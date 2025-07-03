@@ -4,6 +4,9 @@ import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 import { fileURLToPath } from 'url';
 import type { DocumentSource } from '../services/DocumentLoader.js';
+import { CategoryMappingService } from '../services/CategoryMappingService.js';
+import { DomainDiscoveryService } from '../services/DomainDiscoveryService.js';
+import { ConfigError, ConfigFileError, ConfigValidationError } from './ConfigError.js';
 
 // 환경 변수 로드
 dotenv.config();
@@ -12,96 +15,16 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// 서비스 인스턴스 생성
+const categoryMappingService = new CategoryMappingService();
+const domainDiscoveryService = new DomainDiscoveryService(categoryMappingService);
+
 const defaultDomains = [
   { name: 'company', path: 'company', category: '회사정보' },
   { name: 'customer', path: 'customer', category: '고객서비스' },
   { name: 'product', path: 'product', category: '제품정보' },
   { name: 'technical', path: 'technical', category: '기술문서' },
 ];
-
-/**
- * 카테고리 매핑 타입
- */
-interface CategoryMapping {
-  [domainName: string]: string;
-}
-
-/**
- * 기본 카테고리 매핑
- */
-const defaultCategoryMapping: CategoryMapping = {
-  company: '회사정보',
-  customer: '고객서비스',
-  product: '제품정보',
-  technical: '기술문서',
-  service: '서비스',
-  support: '지원',
-  api: 'API문서',
-  guide: '가이드',
-  tutorial: '튜토리얼',
-  faq: '자주묻는질문',
-  news: '뉴스',
-  blog: '블로그',
-  policy: '정책',
-  legal: '법적정보',
-  security: '보안',
-  privacy: '개인정보',
-  terms: '이용약관'
-};
-
-/**
- * 자동으로 도메인 탐지
- * docs 폴더 구조를 스캔하여 도메인 목록 생성
- */
-async function autoDiscoverDomains(basePath: string): Promise<Array<{ name: string; path: string; category: string }>> {
-  try {
-    // 카테고리 매핑 파일 로드 시도
-    let categoryMapping: CategoryMapping = { ...defaultCategoryMapping };
-    const categoryMappingPath = path.resolve(path.dirname(basePath), 'categoryMapping.json');
-    
-    if (fsSync.existsSync(categoryMappingPath)) {
-      try {
-        const mappingContent = await fs.readFile(categoryMappingPath, 'utf-8');
-        const customMapping = JSON.parse(mappingContent);
-        categoryMapping = { ...defaultCategoryMapping, ...customMapping };
-        console.error(`[DEBUG] Loaded custom category mapping from ${categoryMappingPath}`);
-      } catch (error) {
-        console.error(`[DEBUG] Failed to load category mapping: ${(error as Error).message}`);
-      }
-    }
-
-    // docs 폴더 스캔
-    if (!fsSync.existsSync(basePath)) {
-      console.error(`[DEBUG] Base path does not exist: ${basePath}`);
-      return [];
-    }
-
-    const entries = await fs.readdir(basePath, { withFileTypes: true });
-    const domains: Array<{ name: string; path: string; category: string }> = [];
-
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const domainName = entry.name;
-        const domainPath = entry.name;
-        const category = categoryMapping[domainName] || domainName; // 매핑되지 않은 경우 도메인명 사용
-        
-        domains.push({
-          name: domainName,
-          path: domainPath,
-          category: category
-        });
-        
-        console.error(`[DEBUG] Auto-discovered domain: ${domainName} -> ${category}`);
-      }
-    }
-
-    console.error(`[DEBUG] Auto-discovery completed. Found ${domains.length} domains`);
-    return domains;
-  } catch (error) {
-    console.error(`[DEBUG] Auto-discovery failed: ${(error as Error).message}`);
-    return [];
-  }
-}
 
 export interface Config {
   serverName: string;
@@ -149,110 +72,158 @@ const defaultConfig: Config = {
  */
 export async function loadConfig(): Promise<Config> {
   try {
-    // config.json 파일 로드 시도 (절대 경로 사용)
     const configPath = path.resolve(__dirname, '../../config.json');
-    // Loading config (silent for MCP protocol)
+    const configJson = await loadConfigFile(configPath);
     
+    // 도메인 설정 처리
+    const processedConfig = await processDomainsConfiguration(configJson);
+    
+    // 경로 처리
+    const finalConfig = await processBasePath(processedConfig);
+    
+    return finalConfig;
+  } catch (error) {
+    console.error('Failed to load config.json, using default configuration:', error);
+    return await loadDefaultConfig();
+  }
+}
+
+/**
+ * 설정 파일 로드 및 파싱
+ */
+async function loadConfigFile(configPath: string): Promise<any> {
+  try {
     const configContent = await fs.readFile(configPath, 'utf-8');
     const configJson = JSON.parse(configContent);
     
-    // Config loaded successfully (silent for MCP protocol)
+    // 기본 검증
+    validateConfigStructure(configJson);
     
-    // 자동 탐지 활성화 여부 확인
-    const autoDiscoveryEnabled = configJson.documentSource?.autoDiscovery !== false;
+    return configJson;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new ConfigFileError(configPath, new Error('JSON 파싱 오류'));
+    }
+    throw new ConfigFileError(configPath, error as Error);
+  }
+}
+
+/**
+ * 도메인 설정 처리
+ */
+async function processDomainsConfiguration(configJson: any): Promise<any> {
+  const autoDiscoveryEnabled = configJson.documentSource?.autoDiscovery !== false;
+  const hasDomains = configJson.documentSource?.domains?.length > 0;
+  
+  if (autoDiscoveryEnabled && !hasDomains) {
+    console.error('[DEBUG] Auto-discovery enabled and no domains configured, discovering domains automatically.');
     
-    // domains가 없거나 자동 탐지가 활성화된 경우
-    if (autoDiscoveryEnabled && (!configJson.documentSource || !configJson.documentSource.domains || configJson.documentSource.domains.length === 0)) {
-      console.error('[DEBUG] Auto-discovery enabled and no domains configured, discovering domains automatically.');
-      configJson.documentSource = configJson.documentSource || {};
+    configJson.documentSource = configJson.documentSource || {};
+    
+    // basePath 결정
+    const tempBasePath = configJson.documentSource.basePath || defaultConfig.documentSource.basePath;
+    const resolvedTempBasePath = path.isAbsolute(tempBasePath) ? tempBasePath : path.resolve(process.cwd(), tempBasePath);
+    
+    // 자동 탐지 실행
+    try {
+      const discoveredDomains = await domainDiscoveryService.discoverDomains(resolvedTempBasePath);
       
-      // basePath 결정 (임시로 기본값 사용)
-      const tempBasePath = configJson.documentSource.basePath || defaultConfig.documentSource.basePath;
-      const resolvedTempBasePath = path.isAbsolute(tempBasePath) ? tempBasePath : path.resolve(process.cwd(), tempBasePath);
-      
-      // 자동 탐지 실행
-      try {
-        const discoveredDomains = await autoDiscoverDomains(resolvedTempBasePath);
-        if (discoveredDomains.length > 0) {
-          configJson.documentSource.domains = discoveredDomains;
-          console.error(`[DEBUG] Auto-discovered ${discoveredDomains.length} domains`);
-        } else {
-          console.error('[DEBUG] No domains discovered, using default domains.');
-          configJson.documentSource.domains = defaultDomains;
-        }
-      } catch (error) {
-        console.error('[DEBUG] Auto-discovery failed, using default domains:', (error as Error).message);
+      if (discoveredDomains.length > 0) {
+        configJson.documentSource.domains = discoveredDomains;
+        console.error(`[DEBUG] Auto-discovered ${discoveredDomains.length} domains`);
+      } else {
+        console.error('[DEBUG] No domains discovered, using default domains.');
         configJson.documentSource.domains = defaultDomains;
       }
-    } else if (!configJson.documentSource || !configJson.documentSource.domains || configJson.documentSource.domains.length === 0) {
-      console.error('[DEBUG] `documentSource.domains` not found or empty in config.json, using default domains.');
-      configJson.documentSource = configJson.documentSource || {};
+    } catch (error) {
+      console.error('[DEBUG] Auto-discovery failed, using default domains:', (error as Error).message);
       configJson.documentSource.domains = defaultDomains;
     }
+  } else if (!hasDomains) {
+    console.error('[DEBUG] `documentSource.domains` not found or empty in config.json, using default domains.');
+    configJson.documentSource = configJson.documentSource || {};
+    configJson.documentSource.domains = defaultDomains;
+  }
+  
+  return configJson;
+}
 
-    // basePath를 절대 경로로 변환 (상대 경로로 제공된 경우)
-    const basePathFromConfig = configJson.documentSource && configJson.documentSource.basePath
-      ? configJson.documentSource.basePath
-      : defaultConfig.documentSource.basePath;
+/**
+ * 기본 경로 처리
+ */
+async function processBasePath(configJson: any): Promise<Config> {
+  const basePathFromConfig = configJson.documentSource?.basePath || defaultConfig.documentSource.basePath;
+  
+  let resolvedBasePath = path.isAbsolute(basePathFromConfig)
+    ? basePathFromConfig
+    : path.resolve(process.cwd(), basePathFromConfig);
 
-    let resolvedBasePath = path.isAbsolute(basePathFromConfig)
-      ? basePathFromConfig
-      : path.resolve(process.cwd(), basePathFromConfig);
-
-    // fallback: 현재 모듈(__dirname)을 기준으로도 확인
-    if (!fsSync.existsSync(resolvedBasePath)) {
-      const altResolved = path.resolve(__dirname, '../../', basePathFromConfig);
-      console.error(`[DEBUG] Primary basePath not found. Trying fallback relative to __dirname: ${altResolved}`);
-      if (fsSync.existsSync(altResolved)) {
-        resolvedBasePath = altResolved;
-      }
+  // fallback: 현재 모듈(__dirname)을 기준으로도 확인
+  if (!fsSync.existsSync(resolvedBasePath)) {
+    const altResolved = path.resolve(__dirname, '../../', basePathFromConfig);
+    console.error(`[DEBUG] Primary basePath not found. Trying fallback relative to __dirname: ${altResolved}`);
+    if (fsSync.existsSync(altResolved)) {
+      resolvedBasePath = altResolved;
     }
+  }
 
-    // 디버그 로그: 경로 확인
-    console.error(`[DEBUG] Config basePath resolved to: ${resolvedBasePath}`);
-    console.error(`[DEBUG] Working directory: ${process.cwd()}`);
-    console.error(`[DEBUG] Directory exists: ${fsSync.existsSync(resolvedBasePath)}`);
-    if (fsSync.existsSync(resolvedBasePath)) {
-      const stats = fsSync.statSync(resolvedBasePath);
-      console.error(`[DEBUG] Directory readable: ${stats.isDirectory()}`);
+  // 디버그 로그: 경로 확인
+  console.error(`[DEBUG] Config basePath resolved to: ${resolvedBasePath}`);
+  console.error(`[DEBUG] Working directory: ${process.cwd()}`);
+  console.error(`[DEBUG] Directory exists: ${fsSync.existsSync(resolvedBasePath)}`);
+  if (fsSync.existsSync(resolvedBasePath)) {
+    const stats = fsSync.statSync(resolvedBasePath);
+    console.error(`[DEBUG] Directory readable: ${stats.isDirectory()}`);
+  }
+
+  return {
+    ...defaultConfig,
+    ...configJson,
+    documentSource: {
+      ...defaultConfig.documentSource,
+      ...configJson.documentSource,
+      basePath: resolvedBasePath,
+      type: configJson.documentSource.type as 'local' | 'remote'
+    },
+    bm25: {
+      ...defaultConfig.bm25,
+      ...configJson.bm25
+    },
+    chunk: {
+      ...defaultConfig.chunk,
+      ...configJson.chunk
     }
+  };
+}
 
-    return {
-      ...defaultConfig,
-      ...configJson,
-      documentSource: {
-        ...defaultConfig.documentSource,
-        ...configJson.documentSource,
-        basePath: resolvedBasePath,
-        type: configJson.documentSource.type as 'local' | 'remote'
-      },
-      bm25: {
-        ...defaultConfig.bm25,
-        ...configJson.bm25
-      },
-      chunk: {
-        ...defaultConfig.chunk,
-        ...configJson.chunk
-      }
-    };
-  } catch (error) {
-    // config.json이 없으면 기본 설정 사용
-    console.error('Failed to load config.json, using default configuration:', error);
+/**
+ * 기본 설정 로드
+ */
+async function loadDefaultConfig(): Promise<Config> {
+  try {
+    const discoveredDomains = await domainDiscoveryService.discoverDomains(defaultConfig.documentSource.basePath);
     
-    // 자동 탐지 시도
-    try {
-      const discoveredDomains = await autoDiscoverDomains(defaultConfig.documentSource.basePath);
-      if (discoveredDomains.length > 0) {
-        defaultConfig.documentSource.domains = discoveredDomains;
-        console.error(`[DEBUG] Auto-discovered ${discoveredDomains.length} domains in default config`);
-      } else {
-        defaultConfig.documentSource.domains = defaultDomains;
-      }
-    } catch (autoDiscoveryError) {
-      console.error('[DEBUG] Auto-discovery failed in default config, using default domains:', (autoDiscoveryError as Error).message);
+    if (discoveredDomains.length > 0) {
+      defaultConfig.documentSource.domains = discoveredDomains;
+      console.error(`[DEBUG] Auto-discovered ${discoveredDomains.length} domains in default config`);
+    } else {
       defaultConfig.documentSource.domains = defaultDomains;
     }
-    
-    return defaultConfig;
+  } catch (error) {
+    console.error('[DEBUG] Auto-discovery failed in default config, using default domains:', (error as Error).message);
+    defaultConfig.documentSource.domains = defaultDomains;
   }
+  
+  return defaultConfig;
+}
+
+/**
+ * 설정 구조 검증
+ */
+function validateConfigStructure(config: any): void {
+  if (!config || typeof config !== 'object') {
+    throw new ConfigValidationError('config', config, 'object');
+  }
+  
+  // 필수 필드 검증은 병합 과정에서 defaultConfig로 처리됨
 } 

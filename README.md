@@ -36,9 +36,11 @@ npm start
 npm run dev
 ```
 
-## 📋 기본 설정
+## 📋 설정 방법
 
-### config.json 
+### 🎯 자동 도메인 탐지 (권장)
+이제 문서 폴더를 만들기만 하면 자동으로 도메인이 생성됩니다!
+
 ```json
 {
   "serverName": "knowledge-retrieval",  
@@ -46,28 +48,8 @@ npm run dev
   "documentSource": {
     "type": "local",
     "basePath": "./docs",
-    "domains": [
-      {
-        "name": "company",
-        "path": "company",
-        "category": "회사정보"
-      },
-      {
-        "name": "customer", 
-        "path": "customer",
-        "category": "고객서비스"
-      },
-      {
-        "name": "product",
-        "path": "product", 
-        "category": "제품정보"
-      },
-      {
-        "name": "technical",
-        "path": "technical",
-        "category": "기술문서"
-      }
-    ]
+    "autoDiscovery": true,
+    "domains": []
   },
   "bm25": {
     "k1": 1.2,
@@ -81,9 +63,55 @@ npm run dev
 }
 ```
 
+### 📁 간단한 사용법
+1. `docs/` 폴더에 새 폴더 생성
+2. 마크다운 파일 추가
+3. 서버 재시작 → 자동으로 새 도메인 인식! ✨
+
+```bash
+# 예시: 새 도메인 추가
+mkdir docs/marketing
+echo "# 마케팅 전략" > docs/marketing/strategy.md
+npm start  # 자동으로 marketing 도메인 생성됨
+```
+
+### 🏷️ 커스텀 카테고리 설정
+`categoryMapping.json` 파일로 한국어 카테고리 커스터마이징:
+
+```json
+{
+  "company": "회사정보",
+  "customer": "고객서비스", 
+  "product": "제품정보",
+  "technical": "기술문서",
+  "marketing": "마케팅",
+  "sales": "영업",
+  "hr": "인사"
+}
+```
+
+### ⚙️ 수동 설정 (기존 방식)
+자동 탐지를 비활성화하고 수동으로 관리하려면:
+
+```json
+{
+  "documentSource": {
+    "autoDiscovery": false,
+    "domains": [
+      {
+        "name": "company",
+        "path": "company",
+        "category": "회사정보"
+      }
+    ]
+  }
+}
+```
+
 ### 주요 설정 항목
+- **documentSource.autoDiscovery**: 자동 도메인 탐지 활성화 (기본값: true)
 - **documentSource.basePath**: 문서 파일들이 위치한 기본 경로
-- **domains**: 검색할 도메인들의 설정
+- **domains**: 검색할 도메인들의 설정 (자동 탐지시 빈 배열 가능)
 - **bm25.k1**: BM25 알고리즘의 term frequency saturation 파라미터 (기본값: 1.2)
 - **bm25.b**: BM25 알고리즘의 field length normalization 파라미터 (기본값: 0.75)
 - **chunk.minWords**: 청크의 최소 단어 수 (기본값: 30)
@@ -126,28 +154,38 @@ npm run dev
 
 ## 📁 문서 구조
 
-문서는 다음과 같은 구조로 구성되어야 합니다:
+### 🎯 자동 구조 (권장)
+폴더만 만들면 자동으로 도메인 생성:
 
 ```
 docs/
-├── company/           # 회사 정보
+├── company/           # 자동 생성: company 도메인
 │   ├── about.md
 │   └── team.md
-├── customer/          # 고객 서비스
+├── customer/          # 자동 생성: customer 도메인  
 │   ├── support.md
 │   └── sla.md
-├── product/           # 제품 정보
-│   ├── ai-platform.md
-│   └── web-app.md
-└── technical/         # 기술 문서
-    ├── api-guide.md
-    └── deployment.md
+├── marketing/         # 자동 생성: marketing 도메인
+│   └── strategy.md
+└── any-folder-name/   # 자동 생성: any-folder-name 도메인
+    └── document.md
 ```
 
-### 지원 파일 형식
+### 🔄 자동 탐지 특징
+- **스마트 필터링**: `.git`, `node_modules`, 숨김 폴더 자동 제외
+- **우선순위 정렬**: company → customer → product → technical → 나머지 알파벳순
+- **카테고리 매핑**: `categoryMapping.json`으로 한국어 카테고리 설정
+- **실시간 반영**: 새 폴더 추가 후 서버 재시작시 자동 인식
+
+### 📋 지원 파일 형식
 - `.md` (Markdown)
-- `.mdx` (MDX)
+- `.mdx` (MDX) 
 - `.markdown`
+
+### 🚫 자동 제외되는 폴더
+- `.git`, `.vscode`, `node_modules`
+- `dist`, `build`, `temp`, `tmp`
+- `.`으로 시작하는 숨김 폴더
 
 ## 🛠 사용 가능한 MCP 도구들
 
@@ -248,7 +286,7 @@ export LOG_LEVEL="debug"
 
 ## 💡 핵심 요약
 
-### 즉시 사용을 위한 체크리스트
+### 🚀 즉시 사용을 위한 체크리스트
 **자동 설치 사용시:**
 - [ ] `./run.sh` (또는 `run.bat`) 실행
 - [ ] 스크립트가 출력하는 Claude Desktop 설정 복사
@@ -262,11 +300,23 @@ export LOG_LEVEL="debug"
 - [ ] Claude Desktop 재시작
 - [ ] 테스트 질문으로 작동 확인
 
-### 주요 명령어
+### ✨ 새로운 기능: 자동 도메인 탐지
+- **폴더 추가**: `docs/` 안에 새 폴더 생성
+- **카테고리 설정**: `categoryMapping.json` 파일로 커스터마이징
+- **자동 인식**: 서버 재시작시 새 도메인 자동 추가
+- **스마트 필터링**: 시스템 폴더 자동 제외
+
+### 🔧 주요 명령어
 - **개발**: `npm run dev`
 - **빌드**: `npm run build`
 - **실행**: `npm start`
 - **테스트**: `npm test`
+
+### 🎯 간단 사용법
+1. 새 폴더 만들기: `mkdir docs/새도메인`
+2. 문서 추가: `echo "# 내용" > docs/새도메인/문서.md`
+3. 서버 재시작: `npm start`
+4. 자동으로 새 도메인 인식됨! ✨
 
 ---
 
