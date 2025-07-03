@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import * as fsSync from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { KnowledgeDocument, createRemoteMarkdownDocument } from '../models/Document.js';
@@ -30,10 +31,14 @@ export class DocumentLoader {
     this.documents = [];
     this.documentIdCounter = 0;
 
+    console.error(`[DEBUG] DocumentLoader.loadAllDocuments start. Domains to process: ${this.source.domains.length}`);
     for (const domain of this.source.domains) {
+      console.error(`[DEBUG] Processing domain: ${domain.name}, path: ${domain.path}`);
       await this.loadDomainDocuments(domain);
+      console.error(`[DEBUG] Completed domain: ${domain.name}. Total documents so far: ${this.documents.length}`);
     }
 
+    console.error(`[DEBUG] DocumentLoader.loadAllDocuments completed. Total documents loaded: ${this.documents.length}`);
     return this.documents;
   }
 
@@ -46,6 +51,7 @@ export class DocumentLoader {
     category?: string;
   }): Promise<void> {
     const fullPath = path.join(this.source.basePath, domain.path);
+    console.error(`[DEBUG] loadDomainDocuments for ${domain.name}. fullPath=${fullPath}. exists=${fsSync.existsSync(fullPath)}`);
 
     if (this.source.type === 'local') {
       await this.loadLocalDocuments(fullPath, domain.name, domain.category);
@@ -84,6 +90,9 @@ export class DocumentLoader {
         }
       }
     } catch (error) {
+      console.error(`[DEBUG] Failed to load local documents from ${dirPath}:`, (error as Error).message);
+      console.error(`[DEBUG] Working directory: ${process.cwd()}`);
+      console.error(`[DEBUG] Directory exists: ${fsSync.existsSync(dirPath)}`);
       // Failed to load documents (silent for MCP protocol)
     }
   }
@@ -118,10 +127,12 @@ export class DocumentLoader {
           );
           this.documents.push(document);
         } catch (error) {
+          console.error(`[DEBUG] Failed to load remote document ${docUrl}:`, (error as Error).message);
           // Failed to load document (silent for MCP protocol)
         }
       }
     } catch (error) {
+      console.error(`[DEBUG] Failed to load remote documents from ${baseUrl}:`, (error as Error).message);
       // Failed to load documents (silent for MCP protocol)
     }
   }

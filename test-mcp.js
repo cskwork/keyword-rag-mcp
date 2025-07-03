@@ -20,7 +20,8 @@ async function testMCP() {
     console.log(`✓ 문서 로드 성공: ${documents.length}개`);
     
     // 저장소 초기화
-    const repository = new DocumentRepository(documents);
+    const repository = new DocumentRepository();
+    await repository.initialize(documents);
     const stats = repository.getStatistics();
     console.log(`✓ 저장소 초기화 성공: ${stats.totalChunks}개 청크`);
     
