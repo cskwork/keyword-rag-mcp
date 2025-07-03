@@ -1,0 +1,7 @@
+{
+  "category": "사용설명서",
+  "description": "제품 및 서비스 사용 설명서",
+  "tags": ["manual", "guide", "howto"],
+  "priority": 1,
+  "enabled": true
+}

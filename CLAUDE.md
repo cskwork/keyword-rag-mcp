@@ -17,7 +17,8 @@ This is an MCP (Model Context Protocol) server for knowledge retrieval using BM2
 
 - `src/index.ts`: Main MCP server entry point with tool handlers
 - `src/services/DocumentRepository.ts`: Core search and document management using BM25
-- `src/services/DocumentLoader.ts`: Document loading from local/remote sources
+- `src/services/DocumentLoader.ts`: Document loading from local/remote sources with auto-discovery
+- `src/services/DomainDiscovery.ts`: Auto-discovery service for folder-based domain registration
 - `src/models/Document.ts`: Document and chunk data structures
 - `src/utils/bm25.ts`: BM25 algorithm implementation
 - `src/config/config.ts`: Configuration management with environment variable support
@@ -53,9 +54,64 @@ Environment variables can override config file settings (see `src/config/config.
 ## Document Structure
 
 Documents are organized in domains under the configured base path:
-- Each domain has a name, path, and category
-- Supports both local files and remote sources (via llms.txt)
+- **Auto-Discovery**: Automatically detects any folder in `docs/` as a domain
+- **Hierarchical Support**: Supports nested domains (e.g., `docs/company/hr/` becomes `company.hr`)
+- **Hybrid Configuration**: Combines static config.json domains with auto-discovered domains
+- **Metadata Support**: Optional `.domain.json` files for custom domain metadata
+- **Flexible Organization**: Supports both flat and nested folder structures
 - Documents are automatically chunked for optimal search performance
+
+### Zero-Configuration Knowledge Addition
+
+**Simple Workflow**: Just create folders and add markdown files!
+
+```bash
+# Add new knowledge domain
+mkdir docs/faq
+echo "# FAQ\n\nQ: How to use?\nA: Just add markdown files!" > docs/faq/general.md
+
+# Add nested domain
+mkdir -p docs/company/finance
+echo "# Budget Guidelines\n\nAnnual budget process..." > docs/company/finance/budget.md
+
+# Add any folder name - automatically categorized
+mkdir docs/tutorials
+echo "# Getting Started\n\nStep 1: ..." > docs/tutorials/quickstart.md
+```
+
+**Auto-Discovery Features**:
+
+1. **Zero Configuration**: No config.json editing required
+2. **Smart Categories**: Automatic Korean category generation
+   - `faq` → `FAQ`
+   - `tutorials` → `튜토리얼`
+   - `news` → `뉴스`
+   - `manual` → `사용설명서`
+   - `unknown-folder` → `unknown-folder 문서`
+3. **Nested Domains**: `docs/company/hr/` → domain: `company.hr`
+4. **Instant Availability**: New folders immediately available for search
+
+### Advanced Configuration (Optional)
+
+**Custom Categories** via `.domain.json` (completely optional):
+```json
+{
+  "category": "사용설명서",
+  "description": "제품 및 서비스 사용 설명서", 
+  "enabled": true
+}
+```
+
+**Manual Domains** via `config.json` (legacy support):
+```json
+{
+  "documentSource": {
+    "basePath": "./docs",
+    "autoDiscovery": true,
+    "domains": []
+  }
+}
+```
 
 ## MCP Tools Available
 

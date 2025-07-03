@@ -43,7 +43,8 @@ const defaultConfig: Config = {
   documentSource: {
     type: (process.env.DOCS_SOURCE_TYPE as 'local' | 'remote') || 'local',
     basePath: process.env.DOCS_BASE_PATH || path.resolve(__dirname, '../../docs'),
-    domains: []
+    domains: [],
+    autoDiscovery: process.env.AUTO_DISCOVERY !== 'false' // 기본값: true, 환경변수로 비활성화 가능
   },
   bm25: {
     k1: parseFloat(process.env.BM25_K1 || '1.2'),
@@ -112,7 +113,8 @@ export async function loadConfig(): Promise<Config> {
         ...defaultConfig.documentSource,
         ...configJson.documentSource,
         basePath: resolvedBasePath,
-        type: configJson.documentSource.type as 'local' | 'remote'
+        type: configJson.documentSource.type as 'local' | 'remote',
+        autoDiscovery: configJson.documentSource?.autoDiscovery !== false // 기본값: true
       },
       bm25: {
         ...defaultConfig.bm25,

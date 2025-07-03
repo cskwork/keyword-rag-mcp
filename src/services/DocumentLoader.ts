@@ -3,6 +3,7 @@ import * as fsSync from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { KnowledgeDocument, createRemoteMarkdownDocument } from '../models/Document.js';
+import { DomainDiscovery, DiscoveredDomain } from './DomainDiscovery.js';
 
 export interface DocumentSource {
   type: 'local' | 'remote';
@@ -12,6 +13,7 @@ export interface DocumentSource {
     path: string;
     category?: string;
   }>;
+  autoDiscovery?: boolean; // 자동 도메인 발견 활성화 여부
 }
 
 /**
@@ -21,8 +23,11 @@ export interface DocumentSource {
 export class DocumentLoader {
   private documents: KnowledgeDocument[] = [];
   private documentIdCounter = 0;
+  private domainDiscovery: DomainDiscovery;
 
-  constructor(private readonly source: DocumentSource) {}
+  constructor(private readonly source: DocumentSource) {
+    this.domainDiscovery = new DomainDiscovery(source.basePath);
+  }
 
   /**
    * 모든 문서 로드
@@ -31,8 +36,11 @@ export class DocumentLoader {
     this.documents = [];
     this.documentIdCounter = 0;
 
-    console.error(`[DEBUG] DocumentLoader.loadAllDocuments start. Domains to process: ${this.source.domains.length}`);
-    for (const domain of this.source.domains) {
+    // 통합 도메인 목록 생성 (설정 파일 + 자동 발견)
+    const allDomains = await this.getAllDomains();
+    
+    console.error(`[DEBUG] DocumentLoader.loadAllDocuments start. Domains to process: ${allDomains.length}`);
+    for (const domain of allDomains) {
       console.error(`[DEBUG] Processing domain: ${domain.name}, path: ${domain.path}`);
       await this.loadDomainDocuments(domain);
       console.error(`[DEBUG] Completed domain: ${domain.name}. Total documents so far: ${this.documents.length}`);
@@ -40,6 +48,42 @@ export class DocumentLoader {
 
     console.error(`[DEBUG] DocumentLoader.loadAllDocuments completed. Total documents loaded: ${this.documents.length}`);
     return this.documents;
+  }
+
+  /**
+   * 모든 도메인 목록 가져오기 (설정 파일 + 자동 발견)
+   */
+  private async getAllDomains(): Promise<Array<{name: string; path: string; category?: string}>> {
+    const allDomains: Array<{name: string; path: string; category?: string}> = [];
+    
+    // 기존 설정 파일의 도메인 추가
+    allDomains.push(...this.source.domains);
+    
+    // 자동 발견 활성화 시 추가 도메인 발견
+    if (this.source.autoDiscovery !== false) { // 기본값: true
+      console.error('[DEBUG] Auto-discovery enabled, scanning for additional domains');
+      const discoveredDomains = await this.domainDiscovery.discoverDomains();
+      
+      for (const discovered of discoveredDomains) {
+        // 이미 설정 파일에 있는 도메인은 제외
+        const existingDomain = allDomains.find(d => d.name === discovered.name || d.path === discovered.path);
+        if (!existingDomain) {
+          allDomains.push({
+            name: discovered.name,
+            path: discovered.path,
+            category: discovered.category
+          });
+          console.error(`[DEBUG] Added auto-discovered domain: ${discovered.name}`);
+        } else {
+          console.error(`[DEBUG] Skipped duplicate domain: ${discovered.name}`);
+        }
+      }
+      
+      const stats = this.domainDiscovery.getStats();
+      console.error(`[DEBUG] Auto-discovery stats: ${JSON.stringify(stats)}`);
+    }
+    
+    return allDomains;
   }
 
   /**
