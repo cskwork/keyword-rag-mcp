@@ -3,6 +3,7 @@ import * as fsSync from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { KnowledgeDocument, createRemoteMarkdownDocument } from '../models/Document.js';
+import { DocumentPreprocessor } from './DocumentPreprocessor.js';
 
 export interface DocumentSource {
   type: 'local' | 'remote';
@@ -21,8 +22,11 @@ export interface DocumentSource {
 export class DocumentLoader {
   private documents: KnowledgeDocument[] = [];
   private documentIdCounter = 0;
+  private preprocessor: DocumentPreprocessor;
 
-  constructor(private readonly source: DocumentSource) {}
+  constructor(private readonly source: DocumentSource) {
+    this.preprocessor = new DocumentPreprocessor();
+  }
 
   /**
    * 모든 문서 로드
@@ -80,7 +84,7 @@ export class DocumentLoader {
         } else if (entry.isFile() && this.isMarkdownFile(entry.name)) {
           // 마크다운 파일 로드
           const content = await fs.readFile(fullPath, 'utf-8');
-          const document = this.createDocument(
+          const document = await this.createDocument(
             content,
             fullPath,
             domainName,
@@ -119,7 +123,7 @@ export class DocumentLoader {
         try {
           const docResponse = await axios.get(docUrl);
           const content = docResponse.data;
-          const document = this.createDocument(
+          const document = await this.createDocument(
             content,
             docUrl,
             domainName,
@@ -167,29 +171,70 @@ export class DocumentLoader {
   }
 
   /**
-   * 문서 객체 생성
+   * 문서 객체 생성 (전처리 포함)
    */
-  private createDocument(
+  private async createDocument(
     content: string,
     link: string,
     domainName: string,
     category?: string
-  ): KnowledgeDocument {
-    const remoteDoc = createRemoteMarkdownDocument(
-      `doc-${this.documentIdCounter}`,
-      link,
-      content
-    );
+  ): Promise<KnowledgeDocument> {
+    try {
+      // 문서 전처리 수행
+      const preprocessed = await this.preprocessor.preprocessDocument(link, content, domainName);
+      
+      // RemoteMarkdownDocument 생성
+      const remoteDoc = createRemoteMarkdownDocument(
+        `doc-${this.documentIdCounter}`,
+        link,
+        content
+      );
 
-    const document = new KnowledgeDocument(
-      remoteDoc,
-      this.documentIdCounter++,
-      domainName
-    );
+      // 전처리된 메타데이터 통합
+      if (remoteDoc.metadata) {
+        remoteDoc.metadata.preprocessed = preprocessed.metadata;
+        // 키워드 병합 (기존 + 전처리)
+        remoteDoc.metadata.keywords = [
+          ...new Set([
+            ...remoteDoc.metadata.keywords,
+            ...preprocessed.keywords
+          ])
+        ];
+        // 설명 업데이트 (전처리 결과가 더 상세함)
+        if (preprocessed.metadata.description) {
+          remoteDoc.metadata.description = preprocessed.metadata.description;
+        }
+      }
 
-    console.error(`[DEBUG] Created document: ID=${document.id}, title=${document.title}, domainName=${document.domainName}`);
+      const document = new KnowledgeDocument(
+        remoteDoc,
+        this.documentIdCounter++,
+        domainName
+      );
 
-    return document;
+      console.error(`[DEBUG] Created preprocessed document: ID=${document.id}, title=${document.title}, domainName=${document.domainName}, keywords=${document.keywords.length}, wordCount=${preprocessed.metadata.wordCount}`);
+
+      return document;
+    } catch (error) {
+      console.error(`[DEBUG] Error in preprocessing document ${link}: ${(error as Error).message}`);
+      
+      // 전처리 실패시 기본 방식으로 폴백
+      const remoteDoc = createRemoteMarkdownDocument(
+        `doc-${this.documentIdCounter}`,
+        link,
+        content
+      );
+
+      const document = new KnowledgeDocument(
+        remoteDoc,
+        this.documentIdCounter++,
+        domainName
+      );
+
+      console.error(`[DEBUG] Created fallback document: ID=${document.id}, title=${document.title}, domainName=${document.domainName}`);
+
+      return document;
+    }
   }
 
   /**

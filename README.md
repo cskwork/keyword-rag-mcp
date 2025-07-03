@@ -311,6 +311,54 @@ export LOG_LEVEL="debug"
 - **빌드**: `npm run build`
 - **실행**: `npm start`
 - **테스트**: `npm test`
+- **CLI**: `npm run cli -- <command>`
+
+## 🛠️ CLI 도구
+
+프로젝트에는 문서 관리를 위한 강력한 CLI 도구가 포함되어 있습니다:
+
+### 설치 및 사용
+```bash
+# 전역 설치 (권장)
+npm install -g .
+mcp-knowledge-cli --help
+
+# 또는 npm run cli 사용
+npm run cli -- --help
+```
+
+### 문서 관리 명령어
+```bash
+# 문서 인덱싱
+mcp-knowledge-cli index
+
+# 도메인 자동 탐지
+mcp-knowledge-cli discover -p ./docs --create-config
+
+# 새 문서 추가
+mcp-knowledge-cli add-doc technical README.md --copy
+```
+
+### 테스트 및 검증
+```bash
+# 검색 테스트
+mcp-knowledge-cli search "API 인증" "JWT" -d technical -n 3
+
+# 설정 검증
+mcp-knowledge-cli validate
+
+# 시스템 통계 확인
+mcp-knowledge-cli stats --hours 24
+```
+
+### 서버 관리
+```bash
+# 개발 모드로 서버 시작
+mcp-knowledge-cli serve --dev
+
+# 상세 도움말
+mcp-knowledge-cli help-extended
+```
 
 ### 🎯 간단 사용법
 1. 새 폴더 만들기: `mkdir docs/새도메인`

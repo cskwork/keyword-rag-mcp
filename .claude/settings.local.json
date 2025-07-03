@@ -9,7 +9,8 @@
       "Bash(node test_mcp.js)",
       "Bash(rm:*)",
       "Bash(timeout:*)",
-      "Bash(npm run lint)"
+      "Bash(npm run lint)",
+      "Bash(npm run cli:*)"
     ],
     "deny": []
   }

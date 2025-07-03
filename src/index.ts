@@ -14,6 +14,7 @@ import { DocumentRepository } from './services/DocumentRepository.js';
 import { FileWatcherService, FileChangeEvent } from './services/FileWatcherService.js';
 import { CacheService, createSearchCacheKey } from './services/CacheService.js';
 import { ValidationService } from './services/ValidationService.js';
+import { AnalyticsService } from './services/AnalyticsService.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -26,6 +27,7 @@ let isInitializing = false;
 let fileWatcher: FileWatcherService | null = null;
 let searchCache: CacheService<any> | null = null;
 let validationService: ValidationService | null = null;
+let analyticsService: AnalyticsService | null = null;
 
 console.error(`[DEBUG] Module loaded at ${new Date().toISOString()}`);
 
@@ -152,6 +154,12 @@ async function initializeServer() {
     if (!validationService) {
       validationService = new ValidationService();
       console.error(`[DEBUG] Validation service initialized`);
+    }
+    
+    // 분석 서비스 초기화
+    if (!analyticsService) {
+      analyticsService = new AnalyticsService();
+      console.error(`[DEBUG] Analytics service initialized`);
     }
     
     // 파일 감시 서비스 시작 (개발 모드에서만)
@@ -466,6 +474,44 @@ async function main() {
             },
             required: []
           }
+        },
+        {
+          name: 'get-document-metadata',
+          description: 'Get detailed metadata for a specific document including preprocessing results',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'number',
+                description: 'Document ID to retrieve metadata for'
+              }
+            },
+            required: ['id']
+          }
+        },
+        {
+          name: 'get-search-analytics',
+          description: 'Get comprehensive search analytics and usage metrics',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              timeRangeHours: {
+                type: 'number',
+                description: 'Time range in hours for analytics (default: 24)',
+                default: 24
+              }
+            },
+            required: []
+          }
+        },
+        {
+          name: 'get-system-metrics',
+          description: 'Get current system performance metrics and statistics',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            required: []
+          }
         }
       ];
     
@@ -506,13 +552,18 @@ async function main() {
           topN?: number;
         };
 
+        // 시작 시간 기록
+        const startTime = Date.now();
+
         // 캐시 키 생성
         const cacheKey = createSearchCacheKey(keywords, domain, topN);
         
         // 캐시된 결과 확인
         let results: string;
+        let cacheHit = false;
         if (searchCache && searchCache.has(cacheKey)) {
           results = searchCache.get(cacheKey)!;
+          cacheHit = true;
           console.error(`[DEBUG] Cache hit for search: ${cacheKey}`);
         } else {
           // 캐시 미스 - 실제 검색 수행
@@ -527,6 +578,24 @@ async function main() {
             searchCache.set(cacheKey, results);
             console.error(`[DEBUG] Cached search result: ${cacheKey}`);
           }
+        }
+
+        // 응답 시간 계산
+        const responseTime = Date.now() - startTime;
+
+        // 결과에서 문서 개수 추출 (간단한 방식)
+        const resultCount = (results.match(/## Document/g) || []).length;
+
+        // 분석 서비스에 검색 기록
+        if (analyticsService) {
+          await analyticsService.recordSearchQuery(
+            keywords,
+            domain,
+            topN || 10,
+            resultCount,
+            responseTime,
+            cacheHit
+          );
         }
 
         const content: TextContent[] = [{
@@ -691,6 +760,260 @@ Search cache is not initialized.
         const content: TextContent[] = [{
           type: 'text',
           text: statusText.trim()
+        }];
+        
+        return { content };
+      }
+
+      case 'get-document-metadata': {
+        const { id } = args as { id: number };
+        const document = repository.getDocumentById(id);
+
+        if (!document) {
+          const content: TextContent[] = [{
+            type: 'text',
+            text: `Document with ID ${id} not found.`
+          }];
+          
+          return { content };
+        }
+
+        // 기본 메타데이터 수집
+        const basicMetadata = {
+          id: document.id,
+          title: document.title,
+          description: document.description,
+          keywords: document.keywords,
+          domain: document.domainName,
+          link: document.link,
+          chunkCount: document.getChunks().length,
+          totalWords: document.getChunks().reduce((sum, chunk) => sum + chunk.wordCount, 0)
+        };
+
+        // @ts-ignore - accessing private metadata for preprocessing info
+        const preprocessedMetadata = (document as any).metadata?.preprocessed;
+
+        let metadataText = `# Document Metadata\n\n`;
+        metadataText += `**ID**: ${basicMetadata.id}\n`;
+        metadataText += `**Title**: ${basicMetadata.title}\n`;
+        metadataText += `**Description**: ${basicMetadata.description}\n`;
+        metadataText += `**Domain**: ${basicMetadata.domain}\n`;
+        metadataText += `**Source**: ${basicMetadata.link}\n`;
+        metadataText += `**Chunks**: ${basicMetadata.chunkCount}\n`;
+        metadataText += `**Total Words**: ${basicMetadata.totalWords}\n\n`;
+
+        metadataText += `## Keywords\n${basicMetadata.keywords.join(', ')}\n\n`;
+
+        if (preprocessedMetadata) {
+          metadataText += `## Preprocessing Results\n\n`;
+          metadataText += `**Reading Time**: ${preprocessedMetadata.readingTime} minutes\n`;
+          metadataText += `**Complexity**: ${preprocessedMetadata.complexity}\n`;
+          metadataText += `**Language**: ${preprocessedMetadata.language || 'Unknown'}\n`;
+          metadataText += `**Tags**: ${preprocessedMetadata.tags.join(', ')}\n\n`;
+
+          if (preprocessedMetadata.headings.length > 0) {
+            metadataText += `### Document Structure\n`;
+            preprocessedMetadata.headings.forEach((heading: any) => {
+              const indent = '  '.repeat(heading.level - 1);
+              metadataText += `${indent}- ${heading.text}\n`;
+            });
+            metadataText += '\n';
+          }
+
+          if (preprocessedMetadata.codeBlocks.length > 0) {
+            metadataText += `### Code Blocks (${preprocessedMetadata.codeBlocks.length})\n`;
+            preprocessedMetadata.codeBlocks.forEach((block: any, index: number) => {
+              metadataText += `- Block ${index + 1}: ${block.language || 'text'} (${block.lineCount} lines)\n`;
+            });
+            metadataText += '\n';
+          }
+
+          if (preprocessedMetadata.links.length > 0) {
+            metadataText += `### Links (${preprocessedMetadata.links.length})\n`;
+            const externalLinks = preprocessedMetadata.links.filter((link: any) => link.isExternal);
+            const internalLinks = preprocessedMetadata.links.filter((link: any) => !link.isExternal);
+            metadataText += `- External: ${externalLinks.length}\n`;
+            metadataText += `- Internal: ${internalLinks.length}\n\n`;
+          }
+
+          if (preprocessedMetadata.images.length > 0) {
+            metadataText += `### Images (${preprocessedMetadata.images.length})\n`;
+            preprocessedMetadata.images.forEach((image: any, index: number) => {
+              metadataText += `- Image ${index + 1}: ${image.alt || 'No alt text'}\n`;
+            });
+            metadataText += '\n';
+          }
+
+          if (preprocessedMetadata.tables.length > 0) {
+            metadataText += `### Tables (${preprocessedMetadata.tables.length})\n`;
+            preprocessedMetadata.tables.forEach((table: any, index: number) => {
+              metadataText += `- Table ${index + 1}: ${table.columnCount} columns, ${table.rowCount} rows\n`;
+            });
+            metadataText += '\n';
+          }
+
+          if (preprocessedMetadata.createdAt || preprocessedMetadata.updatedAt) {
+            metadataText += `### File Information\n`;
+            if (preprocessedMetadata.createdAt) {
+              metadataText += `**Created**: ${new Date(preprocessedMetadata.createdAt).toLocaleString()}\n`;
+            }
+            if (preprocessedMetadata.updatedAt) {
+              metadataText += `**Modified**: ${new Date(preprocessedMetadata.updatedAt).toLocaleString()}\n`;
+            }
+          }
+        }
+
+        const content: TextContent[] = [{
+          type: 'text',
+          text: metadataText.trim()
+        }];
+        
+        return { content };
+      }
+
+      case 'get-search-analytics': {
+        const { timeRangeHours } = args as { timeRangeHours?: number };
+        
+        if (!analyticsService) {
+          const content: TextContent[] = [{
+            type: 'text',
+            text: 'Analytics service is not available.'
+          }];
+          return { content };
+        }
+
+        const analytics = await analyticsService.getSearchAnalytics(timeRangeHours);
+        const userStats = analyticsService.getUserStats(timeRangeHours);
+
+        let analyticsText = `# Search Analytics Report\n\n`;
+        analyticsText += `**Time Range**: Last ${timeRangeHours || 24} hours\n`;
+        analyticsText += `**Generated**: ${new Date().toLocaleString()}\n\n`;
+
+        // 기본 통계
+        analyticsText += `## Overview\n\n`;
+        analyticsText += `- **Total Queries**: ${analytics.totalQueries}\n`;
+        analyticsText += `- **Average Response Time**: ${analytics.avgResponseTime}ms\n`;
+        analyticsText += `- **Cache Hit Rate**: ${(analytics.cacheHitRate * 100).toFixed(1)}%\n`;
+        analyticsText += `- **Unique Users**: ${userStats.totalUsers}\n`;
+        analyticsText += `- **Avg Queries per User**: ${userStats.avgQueriesPerUser}\n\n`;
+
+        // 인기 키워드
+        if (analytics.topKeywords.length > 0) {
+          analyticsText += `## Top Keywords\n\n`;
+          analytics.topKeywords.slice(0, 10).forEach((kw, index) => {
+            analyticsText += `${index + 1}. **${kw.keyword}** (${kw.count} searches)\n`;
+          });
+          analyticsText += '\n';
+        }
+
+        // 도메인별 통계
+        if (analytics.topDomains.length > 0) {
+          analyticsText += `## Domain Statistics\n\n`;
+          analytics.topDomains.forEach(domain => {
+            analyticsText += `### ${domain.domain}\n`;
+            analyticsText += `- Queries: ${domain.queryCount}\n`;
+            analyticsText += `- Avg Response Time: ${domain.avgResponseTime}ms\n`;
+            analyticsText += `- Cache Hit Rate: ${(domain.cacheHitRate * 100).toFixed(1)}%\n`;
+            if (domain.popularKeywords.length > 0) {
+              analyticsText += `- Popular Keywords: ${domain.popularKeywords.map(k => k.keyword).join(', ')}\n`;
+            }
+            analyticsText += '\n';
+          });
+        }
+
+        // 시간대별 패턴
+        if (analytics.timeBasedStats.some(stat => stat.queryCount > 0)) {
+          analyticsText += `## Usage Patterns by Hour\n\n`;
+          const peakHours = analytics.timeBasedStats
+            .filter(stat => stat.queryCount > 0)
+            .sort((a, b) => b.queryCount - a.queryCount)
+            .slice(0, 5);
+          
+          peakHours.forEach(stat => {
+            analyticsText += `- **${stat.hour}:00**: ${stat.queryCount} queries (${stat.avgResponseTime}ms avg)\n`;
+          });
+          analyticsText += '\n';
+        }
+
+        // 성능 메트릭
+        analyticsText += `## Performance Metrics\n\n`;
+        analyticsText += `- **P50 Response Time**: ${analytics.performanceMetrics.p50ResponseTime}ms\n`;
+        analyticsText += `- **P90 Response Time**: ${analytics.performanceMetrics.p90ResponseTime}ms\n`;
+        analyticsText += `- **P99 Response Time**: ${analytics.performanceMetrics.p99ResponseTime}ms\n\n`;
+
+        // 느린 쿼리
+        if (analytics.performanceMetrics.slowestQueries.length > 0) {
+          analyticsText += `## Slowest Queries\n\n`;
+          analytics.performanceMetrics.slowestQueries.slice(0, 3).forEach((query, index) => {
+            analyticsText += `${index + 1}. **${query.keywords.join(', ')}** (${query.responseTime}ms)\n`;
+            analyticsText += `   - Domain: ${query.domain || 'All'}\n`;
+            analyticsText += `   - Results: ${query.resultCount}\n`;
+            analyticsText += `   - Cache Hit: ${query.cacheHit ? 'Yes' : 'No'}\n\n`;
+          });
+        }
+
+        const content: TextContent[] = [{
+          type: 'text',
+          text: analyticsText.trim()
+        }];
+        
+        return { content };
+      }
+
+      case 'get-system-metrics': {
+        if (!analyticsService) {
+          const content: TextContent[] = [{
+            type: 'text',
+            text: 'Analytics service is not available.'
+          }];
+          return { content };
+        }
+
+        const repoStats = repository.getStatistics();
+        const cacheStats = searchCache ? searchCache.getStats() : null;
+        const systemMetrics = analyticsService.getSystemMetrics(
+          repoStats.totalDocuments,
+          repoStats.totalChunks,
+          cacheStats
+        );
+
+        let metricsText = `# System Metrics\n\n`;
+        metricsText += `**Timestamp**: ${new Date().toLocaleString()}\n`;
+        metricsText += `**Uptime**: ${Math.floor(systemMetrics.uptime / 3600)}h ${Math.floor((systemMetrics.uptime % 3600) / 60)}m\n\n`;
+
+        // 메모리 사용량
+        metricsText += `## Memory Usage\n\n`;
+        metricsText += `- **Used**: ${systemMetrics.memoryUsage.used} MB\n`;
+        metricsText += `- **Total**: ${systemMetrics.memoryUsage.total} MB\n`;
+        metricsText += `- **Usage**: ${systemMetrics.memoryUsage.percentage}%\n\n`;
+
+        // 문서 통계
+        metricsText += `## Document Repository\n\n`;
+        metricsText += `- **Total Documents**: ${systemMetrics.documentStats.totalDocuments}\n`;
+        metricsText += `- **Total Chunks**: ${systemMetrics.documentStats.totalChunks}\n`;
+        metricsText += `- **Avg Chunks per Document**: ${systemMetrics.documentStats.avgDocumentSize}\n\n`;
+
+        // 캐시 통계
+        metricsText += `## Cache Performance\n\n`;
+        metricsText += `- **Cache Size**: ${systemMetrics.cacheStats.size} entries\n`;
+        metricsText += `- **Hit Rate**: ${(systemMetrics.cacheStats.hitRate * 100).toFixed(1)}%\n`;
+        metricsText += `- **Evictions**: ${systemMetrics.cacheStats.evictionCount}\n\n`;
+
+        // 서비스 상태
+        metricsText += `## Service Status\n\n`;
+        metricsText += `- **Repository**: ${repository?.isInitialized() ? '✅ Initialized' : '❌ Not Initialized'}\n`;
+        metricsText += `- **File Watcher**: ${fileWatcher ? '✅ Active' : '❌ Inactive'}\n`;
+        metricsText += `- **Search Cache**: ${searchCache ? '✅ Active' : '❌ Inactive'}\n`;
+        metricsText += `- **Analytics**: ${analyticsService ? '✅ Active' : '❌ Inactive'}\n`;
+        metricsText += `- **Validation**: ${validationService ? '✅ Active' : '❌ Inactive'}\n\n`;
+
+        // 저장된 분석 데이터
+        metricsText += `## Analytics Data\n\n`;
+        metricsText += `- **Stored Queries**: ${analyticsService.getStoredQueryCount()}\n`;
+
+        const content: TextContent[] = [{
+          type: 'text',
+          text: metricsText.trim()
         }];
         
         return { content };

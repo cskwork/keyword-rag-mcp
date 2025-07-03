@@ -5,12 +5,14 @@
   "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "mcp-knowledge-retrieval": "dist/index.js"
+    "mcp-knowledge-retrieval": "dist/index.js",
+    "mcp-knowledge-cli": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "NODE_ENV=development tsx src/index.ts",
+    "cli": "tsx src/cli.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -31,6 +33,7 @@
     "@types/chokidar": "^1.7.5",
     "axios": "^1.6.0",
     "chokidar": "^4.0.3",
+    "commander": "^14.0.0",
     "dotenv": "^16.3.1",
     "remark-parse": "^11.0.0",
     "unified": "^11.0.0",
