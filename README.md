@@ -1,7 +1,7 @@
 # MCP Knowledge Retrieval Server
 
 BM25 기반 문서 검색 및 검색을 위한 MCP(Model Context Protocol) 서버입니다.
-참고한 토스결제연동 MCP 기술블로그. https://toss.tech/article/tosspayments-mcp
+- 참고한 토스결제연동 MCP 기술블로그. https://toss.tech/article/tosspayments-mcp
 
 ## 🚀 즉시 시작하기
 
