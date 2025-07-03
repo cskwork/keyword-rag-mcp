@@ -27,3 +27,6 @@ coverage/
 # 임시 파일
 *.tmp
 temp/ 
+.claude
+CLAUDE.md
+package-lock.json
