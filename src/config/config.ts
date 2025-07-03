@@ -19,10 +19,96 @@ const defaultDomains = [
   { name: 'technical', path: 'technical', category: '기술문서' },
 ];
 
+/**
+ * 카테고리 매핑 타입
+ */
+interface CategoryMapping {
+  [domainName: string]: string;
+}
+
+/**
+ * 기본 카테고리 매핑
+ */
+const defaultCategoryMapping: CategoryMapping = {
+  company: '회사정보',
+  customer: '고객서비스',
+  product: '제품정보',
+  technical: '기술문서',
+  service: '서비스',
+  support: '지원',
+  api: 'API문서',
+  guide: '가이드',
+  tutorial: '튜토리얼',
+  faq: '자주묻는질문',
+  news: '뉴스',
+  blog: '블로그',
+  policy: '정책',
+  legal: '법적정보',
+  security: '보안',
+  privacy: '개인정보',
+  terms: '이용약관'
+};
+
+/**
+ * 자동으로 도메인 탐지
+ * docs 폴더 구조를 스캔하여 도메인 목록 생성
+ */
+async function autoDiscoverDomains(basePath: string): Promise<Array<{ name: string; path: string; category: string }>> {
+  try {
+    // 카테고리 매핑 파일 로드 시도
+    let categoryMapping: CategoryMapping = { ...defaultCategoryMapping };
+    const categoryMappingPath = path.resolve(path.dirname(basePath), 'categoryMapping.json');
+    
+    if (fsSync.existsSync(categoryMappingPath)) {
+      try {
+        const mappingContent = await fs.readFile(categoryMappingPath, 'utf-8');
+        const customMapping = JSON.parse(mappingContent);
+        categoryMapping = { ...defaultCategoryMapping, ...customMapping };
+        console.error(`[DEBUG] Loaded custom category mapping from ${categoryMappingPath}`);
+      } catch (error) {
+        console.error(`[DEBUG] Failed to load category mapping: ${(error as Error).message}`);
+      }
+    }
+
+    // docs 폴더 스캔
+    if (!fsSync.existsSync(basePath)) {
+      console.error(`[DEBUG] Base path does not exist: ${basePath}`);
+      return [];
+    }
+
+    const entries = await fs.readdir(basePath, { withFileTypes: true });
+    const domains: Array<{ name: string; path: string; category: string }> = [];
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const domainName = entry.name;
+        const domainPath = entry.name;
+        const category = categoryMapping[domainName] || domainName; // 매핑되지 않은 경우 도메인명 사용
+        
+        domains.push({
+          name: domainName,
+          path: domainPath,
+          category: category
+        });
+        
+        console.error(`[DEBUG] Auto-discovered domain: ${domainName} -> ${category}`);
+      }
+    }
+
+    console.error(`[DEBUG] Auto-discovery completed. Found ${domains.length} domains`);
+    return domains;
+  } catch (error) {
+    console.error(`[DEBUG] Auto-discovery failed: ${(error as Error).message}`);
+    return [];
+  }
+}
+
 export interface Config {
   serverName: string;
   serverVersion: string;
-  documentSource: DocumentSource;
+  documentSource: DocumentSource & {
+    autoDiscovery?: boolean;
+  };
   bm25: {
     k1: number;
     b: number;
@@ -43,7 +129,8 @@ const defaultConfig: Config = {
   documentSource: {
     type: (process.env.DOCS_SOURCE_TYPE as 'local' | 'remote') || 'local',
     basePath: process.env.DOCS_BASE_PATH || path.resolve(__dirname, '../../docs'),
-    domains: []
+    domains: [],
+    autoDiscovery: process.env.DOCS_AUTO_DISCOVERY === 'true' || true
   },
   bm25: {
     k1: parseFloat(process.env.BM25_K1 || '1.2'),
@@ -71,8 +158,33 @@ export async function loadConfig(): Promise<Config> {
     
     // Config loaded successfully (silent for MCP protocol)
     
-    // domains가 없으면 기본값으로 채움
-    if (!configJson.documentSource || !configJson.documentSource.domains || configJson.documentSource.domains.length === 0) {
+    // 자동 탐지 활성화 여부 확인
+    const autoDiscoveryEnabled = configJson.documentSource?.autoDiscovery !== false;
+    
+    // domains가 없거나 자동 탐지가 활성화된 경우
+    if (autoDiscoveryEnabled && (!configJson.documentSource || !configJson.documentSource.domains || configJson.documentSource.domains.length === 0)) {
+      console.error('[DEBUG] Auto-discovery enabled and no domains configured, discovering domains automatically.');
+      configJson.documentSource = configJson.documentSource || {};
+      
+      // basePath 결정 (임시로 기본값 사용)
+      const tempBasePath = configJson.documentSource.basePath || defaultConfig.documentSource.basePath;
+      const resolvedTempBasePath = path.isAbsolute(tempBasePath) ? tempBasePath : path.resolve(process.cwd(), tempBasePath);
+      
+      // 자동 탐지 실행
+      try {
+        const discoveredDomains = await autoDiscoverDomains(resolvedTempBasePath);
+        if (discoveredDomains.length > 0) {
+          configJson.documentSource.domains = discoveredDomains;
+          console.error(`[DEBUG] Auto-discovered ${discoveredDomains.length} domains`);
+        } else {
+          console.error('[DEBUG] No domains discovered, using default domains.');
+          configJson.documentSource.domains = defaultDomains;
+        }
+      } catch (error) {
+        console.error('[DEBUG] Auto-discovery failed, using default domains:', (error as Error).message);
+        configJson.documentSource.domains = defaultDomains;
+      }
+    } else if (!configJson.documentSource || !configJson.documentSource.domains || configJson.documentSource.domains.length === 0) {
       console.error('[DEBUG] `documentSource.domains` not found or empty in config.json, using default domains.');
       configJson.documentSource = configJson.documentSource || {};
       configJson.documentSource.domains = defaultDomains;
@@ -127,8 +239,19 @@ export async function loadConfig(): Promise<Config> {
     // config.json이 없으면 기본 설정 사용
     console.error('Failed to load config.json, using default configuration:', error);
     
-    // 기본 도메인 설정
-    defaultConfig.documentSource.domains = defaultDomains;
+    // 자동 탐지 시도
+    try {
+      const discoveredDomains = await autoDiscoverDomains(defaultConfig.documentSource.basePath);
+      if (discoveredDomains.length > 0) {
+        defaultConfig.documentSource.domains = discoveredDomains;
+        console.error(`[DEBUG] Auto-discovered ${discoveredDomains.length} domains in default config`);
+      } else {
+        defaultConfig.documentSource.domains = defaultDomains;
+      }
+    } catch (autoDiscoveryError) {
+      console.error('[DEBUG] Auto-discovery failed in default config, using default domains:', (autoDiscoveryError as Error).message);
+      defaultConfig.documentSource.domains = defaultDomains;
+    }
     
     return defaultConfig;
   }

@@ -38,7 +38,7 @@ npm run dev
 
 ## 📋 기본 설정
 
-### config.json (자동 생성됨)
+### config.json 
 ```json
 {
   "serverName": "knowledge-retrieval",  

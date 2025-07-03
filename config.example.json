@@ -4,6 +4,7 @@
   "documentSource": {
     "type": "local",
     "basePath": "./docs",
+    "autoDiscovery": true,
     "domains": [
       {
         "name": "company",
@@ -35,5 +36,10 @@
     "minWords": 30,
     "contextWindowSize": 1
   },
-  "logLevel": "info"
+  "logLevel": "info",
+  "_comments": {
+    "autoDiscovery": "자동 탐지 활성화 시 docs 폴더를 스캔하여 도메인을 자동으로 생성합니다. domains 배열이 비어있거나 없으면 자동으로 채워집니다.",
+    "categoryMapping": "categoryMapping.json 파일을 생성하여 커스텀 카테고리를 설정할 수 있습니다. 예: categoryMapping.example.json 참조",
+    "manualDomains": "autoDiscovery: false로 설정하면 수동으로 domains 배열을 관리할 수 있습니다."
+  }
 } 
