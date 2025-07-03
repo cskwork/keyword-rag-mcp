@@ -518,19 +518,31 @@ async function main() {
     return { tools };
   });
 
+  // 에러 응답 생성 도우미 함수
+  const createErrorResponse = (message: string) => ({
+    content: [{
+      type: 'text' as const,
+      text: `Error: ${message}`
+    }]
+  });
+
   // 도구 실행 핸들러
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     
     console.error(`[DEBUG] Tool called: ${name}`);
+    console.error(`[DEBUG] Arguments received:`, JSON.stringify(args));
     console.error(`[DEBUG] Repository state: ${repository ? 'EXISTS' : 'NULL'}`);
+    
+    // args 안전성 체크
+    const safeArgs = args || {};
     
     // 도구 호출 전에 반드시 서버 준비 상태 확인
     try {
       await ensureServerReady();
     } catch (error) {
       console.error('[FATAL] Server initialization failed during tool call:', error);
-      throw new Error('Server is not initialized and failed to recover. Please check logs and restart.');
+      return createErrorResponse('Server is not initialized and failed to recover. Please check logs and restart.');
     }
 
     // 상태 로깅
@@ -541,12 +553,17 @@ async function main() {
 
     // 이 시점에서 repository는 null이 아님을 보장
     if (!repository || !repository.isInitialized()) {
-      throw new Error('Repository is not properly initialized');
+      return createErrorResponse('Repository is not properly initialized');
     }
 
     switch (name) {
       case 'search-documents': {
-        const { keywords, domain, topN } = args as {
+        // 필수 파라미터 검증
+        if (!safeArgs.keywords || !Array.isArray(safeArgs.keywords) || safeArgs.keywords.length === 0) {
+          return createErrorResponse('keywords parameter is required and must be a non-empty array');
+        }
+        
+        const { keywords, domain, topN = 10 } = safeArgs as {
           keywords: string[];
           domain?: string;
           topN?: number;
@@ -607,16 +624,16 @@ async function main() {
       }
 
       case 'get-document-by-id': {
-        const { id } = args as { id: number };
+        // 필수 파라미터 검증
+        if (typeof safeArgs.id !== 'number') {
+          return createErrorResponse('id parameter is required and must be a number');
+        }
+        
+        const { id } = safeArgs as { id: number };
         const document = repository.getDocumentById(id);
 
         if (!document) {
-          const content: TextContent[] = [{
-            type: 'text',
-            text: `Document with ID ${id} not found.`
-          }];
-          
-          return { content };
+          return createErrorResponse(`Document with ID ${id} not found`);
         }
 
         const content: TextContent[] = [{
@@ -653,7 +670,12 @@ async function main() {
       }
 
       case 'get-chunk-with-context': {
-        const { documentId, chunkId, windowSize } = args as {
+        // 필수 파라미터 검증
+        if (typeof safeArgs.documentId !== 'number' || typeof safeArgs.chunkId !== 'number') {
+          return createErrorResponse('documentId and chunkId parameters are required and must be numbers');
+        }
+        
+        const { documentId, chunkId, windowSize = 1 } = safeArgs as {
           documentId: number;
           chunkId: number;
           windowSize?: number;
@@ -661,22 +683,12 @@ async function main() {
 
         const document = repository.getDocumentById(documentId);
         if (!document) {
-          const content: TextContent[] = [{
-            type: 'text',
-            text: `Document with ID ${documentId} not found.`
-          }];
-          
-          return { content };
+          return createErrorResponse(`Document with ID ${documentId} not found`);
         }
 
-        const chunks = document.getChunkWithWindow(chunkId, windowSize || 1);
+        const chunks = document.getChunkWithWindow(chunkId, windowSize);
         if (chunks.length === 0) {
-          const content: TextContent[] = [{
-            type: 'text',
-            text: `Chunk with ID ${chunkId} not found.`
-          }];
-          
-          return { content };
+          return createErrorResponse(`Chunk with ID ${chunkId} not found`);
         }
 
         const content = chunks.map(chunk => chunk.text).join('\n\n---\n\n');
@@ -732,14 +744,10 @@ Search cache is not initialized.
       }
 
       case 'health-check': {
-        const { detailed } = args as { detailed?: boolean };
+        const { detailed = false } = safeArgs as { detailed?: boolean };
         
         if (!validationService) {
-          const content: TextContent[] = [{
-            type: 'text',
-            text: 'Validation service is not available.'
-          }];
-          return { content };
+          return createErrorResponse('Validation service is not available');
         }
 
         const healthCheck = await validationService.performHealthCheck(config, repository);
@@ -766,16 +774,16 @@ Search cache is not initialized.
       }
 
       case 'get-document-metadata': {
-        const { id } = args as { id: number };
+        // 필수 파라미터 검증
+        if (typeof safeArgs.id !== 'number') {
+          return createErrorResponse('id parameter is required and must be a number');
+        }
+        
+        const { id } = safeArgs as { id: number };
         const document = repository.getDocumentById(id);
 
         if (!document) {
-          const content: TextContent[] = [{
-            type: 'text',
-            text: `Document with ID ${id} not found.`
-          }];
-          
-          return { content };
+          return createErrorResponse(`Document with ID ${id} not found`);
         }
 
         // 기본 메타데이터 수집
@@ -872,14 +880,10 @@ Search cache is not initialized.
       }
 
       case 'get-search-analytics': {
-        const { timeRangeHours } = args as { timeRangeHours?: number };
+        const { timeRangeHours = 24 } = safeArgs as { timeRangeHours?: number };
         
         if (!analyticsService) {
-          const content: TextContent[] = [{
-            type: 'text',
-            text: 'Analytics service is not available.'
-          }];
-          return { content };
+          return createErrorResponse('Analytics service is not available');
         }
 
         const analytics = await analyticsService.getSearchAnalytics(timeRangeHours);
@@ -962,11 +966,7 @@ Search cache is not initialized.
 
       case 'get-system-metrics': {
         if (!analyticsService) {
-          const content: TextContent[] = [{
-            type: 'text',
-            text: 'Analytics service is not available.'
-          }];
-          return { content };
+          return createErrorResponse('Analytics service is not available');
         }
 
         const repoStats = repository.getStatistics();
