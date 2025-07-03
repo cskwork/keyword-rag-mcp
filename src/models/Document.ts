@@ -1,5 +1,6 @@
 import type { DocumentChunk } from '../utils/bm25.js';
 import { splitMarkdownIntoChunks, joinShortChunks, extractMetadata } from '../utils/markdownParser.js';
+import type { DocumentMetadata as PreprocessorMetadata } from '../services/DocumentPreprocessor.js';
 
 export interface DocumentMetadata {
   title: string;
@@ -9,6 +10,8 @@ export interface DocumentMetadata {
   category?: string;
   source?: string;
   lastUpdated?: Date;
+  // 전처리기에서 추가된 메타데이터
+  preprocessed?: PreprocessorMetadata;
 }
 
 export interface RemoteMarkdownDocument {

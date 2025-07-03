@@ -11,6 +11,9 @@ import {
 import { loadConfig } from './config/config.js';
 import { DocumentLoader } from './services/DocumentLoader.js';
 import { DocumentRepository } from './services/DocumentRepository.js';
+import { FileWatcherService, FileChangeEvent } from './services/FileWatcherService.js';
+import { CacheService, createSearchCacheKey } from './services/CacheService.js';
+import { ValidationService } from './services/ValidationService.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -20,6 +23,9 @@ let repository: DocumentRepository | null = null;
 let config: any = null;
 let isInitialized = false;
 let isInitializing = false;
+let fileWatcher: FileWatcherService | null = null;
+let searchCache: CacheService<any> | null = null;
+let validationService: ValidationService | null = null;
 
 console.error(`[DEBUG] Module loaded at ${new Date().toISOString()}`);
 
@@ -136,6 +142,23 @@ async function initializeServer() {
     console.error(`[DEBUG] Repository instance: ${repository ? 'EXISTS' : 'NULL'}`);
     console.error(`[DEBUG] Repository stats: ${JSON.stringify(stats)}`);
     
+    // 검색 캐시 초기화
+    if (!searchCache) {
+      searchCache = new CacheService(500); // 최대 500개 검색 결과 캐싱
+      console.error(`[DEBUG] Search cache initialized`);
+    }
+    
+    // 검증 서비스 초기화
+    if (!validationService) {
+      validationService = new ValidationService();
+      console.error(`[DEBUG] Validation service initialized`);
+    }
+    
+    // 파일 감시 서비스 시작 (개발 모드에서만)
+    if (process.env.NODE_ENV !== 'production' && !fileWatcher) {
+      setupFileWatcher();
+    }
+    
     isInitialized = true;
     console.error(`[DEBUG] initializeServer() completed successfully, isInitialized=${isInitialized}`);
   } catch (error) {
@@ -144,6 +167,145 @@ async function initializeServer() {
     throw error;
   } finally {
     isInitializing = false;
+  }
+}
+
+/**
+ * 파일 감시 서비스 설정
+ */
+function setupFileWatcher(): void {
+  if (!config?.documentSource?.basePath) {
+    console.error(`[DEBUG] FileWatcher: basePath not available, skipping file watching`);
+    return;
+  }
+
+  try {
+    fileWatcher = new FileWatcherService();
+    
+    // 파일 변경 이벤트 처리
+    fileWatcher.on('fileChange', handleFileChange);
+    
+    // 에러 처리
+    fileWatcher.on('error', (error: Error) => {
+      console.error(`[DEBUG] FileWatcher error: ${error.message}`);
+    });
+    
+    // 감시 시작
+    fileWatcher.startWatching(config.documentSource.basePath);
+    console.error(`[DEBUG] File watching started for: ${config.documentSource.basePath}`);
+  } catch (error) {
+    console.error(`[DEBUG] Failed to setup file watcher: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * 파일 변경 이벤트 처리
+ */
+async function handleFileChange(event: FileChangeEvent): Promise<void> {
+  try {
+    console.error(`[DEBUG] File change detected: ${event.type} - ${event.path}`);
+    
+    // 검색 캐시 무효화
+    if (searchCache) {
+      if (event.type === 'addDir' || event.type === 'unlinkDir') {
+        // 도메인 변경시 모든 캐시 무효화
+        searchCache.clear();
+        console.error(`[DEBUG] Cleared all cache due to domain changes`);
+      } else {
+        // 특정 도메인 관련 캐시만 무효화
+        const domain = event.path.split('/')[0];
+        const deletedCount = searchCache.deleteByPattern(new RegExp(`search:.*:${domain}:`));
+        console.error(`[DEBUG] Invalidated ${deletedCount} cache entries for domain: ${domain}`);
+      }
+    }
+    
+    // 디렉토리 변경인 경우 전체 재초기화
+    if (event.type === 'addDir' || event.type === 'unlinkDir') {
+      console.error(`[DEBUG] Domain structure changed, triggering full reload`);
+      await reloadDocuments();
+      return;
+    }
+    
+    // 파일 변경인 경우 점진적 업데이트
+    if (event.type === 'add' || event.type === 'change') {
+      await updateSingleDocument(event.path);
+    } else if (event.type === 'unlink') {
+      await removeSingleDocument(event.path);
+    }
+    
+  } catch (error) {
+    console.error(`[DEBUG] Error handling file change: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * 전체 문서 다시 로드
+ */
+async function reloadDocuments(): Promise<void> {
+  try {
+    console.error(`[DEBUG] Starting full document reload...`);
+    
+    // 기존 상태 리셋
+    isInitialized = false;
+    
+    // 새로운 설정 로드
+    config = await loadConfig();
+    
+    // 문서 다시 로드
+    const loader = new DocumentLoader(config.documentSource);
+    const documents = await loader.loadAllDocuments();
+    
+    // Repository 재초기화
+    if (repository) {
+      await repository.initialize(documents);
+    }
+    
+    isInitialized = true;
+    console.error(`[DEBUG] Full document reload completed. Loaded ${documents.length} documents`);
+    
+  } catch (error) {
+    console.error(`[DEBUG] Error during full reload: ${(error as Error).message}`);
+    isInitialized = false;
+  }
+}
+
+/**
+ * 단일 문서 업데이트
+ */
+async function updateSingleDocument(filePath: string): Promise<void> {
+  try {
+    console.error(`[DEBUG] Updating single document: ${filePath}`);
+    
+    if (!repository || !config) {
+      console.error(`[DEBUG] Repository or config not available, skipping update`);
+      return;
+    }
+    
+    // 전체 재로드로 대체 (단순화를 위해)
+    await reloadDocuments();
+    
+  } catch (error) {
+    console.error(`[DEBUG] Error updating single document: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * 단일 문서 제거
+ */
+async function removeSingleDocument(filePath: string): Promise<void> {
+  try {
+    console.error(`[DEBUG] Removing single document: ${filePath}`);
+    
+    if (!repository) {
+      console.error(`[DEBUG] Repository not available, skipping removal`);
+      return;
+    }
+    
+    // 전체 재로드로 대체 (단순화를 위해)
+    await reloadDocuments();
+    
+  } catch (error) {
+    console.error(`[DEBUG] Error removing single document: ${(error as Error).message}`);
   }
 }
 
@@ -280,6 +442,30 @@ async function main() {
             },
             required: ['documentId', 'chunkId']
           }
+        },
+        {
+          name: 'get-cache-stats',
+          description: 'Get search cache statistics and performance metrics',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            required: []
+          }
+        },
+        {
+          name: 'health-check',
+          description: 'Perform comprehensive system health check',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              detailed: {
+                type: 'boolean',
+                description: 'Include detailed diagnostic information',
+                default: false
+              }
+            },
+            required: []
+          }
         }
       ];
     
@@ -320,11 +506,28 @@ async function main() {
           topN?: number;
         };
 
-        const results = await repository.searchDocuments(keywords, {
-          domain,
-          topN,
-          contextWindow: config.chunk.contextWindowSize
-        });
+        // 캐시 키 생성
+        const cacheKey = createSearchCacheKey(keywords, domain, topN);
+        
+        // 캐시된 결과 확인
+        let results: string;
+        if (searchCache && searchCache.has(cacheKey)) {
+          results = searchCache.get(cacheKey)!;
+          console.error(`[DEBUG] Cache hit for search: ${cacheKey}`);
+        } else {
+          // 캐시 미스 - 실제 검색 수행
+          results = await repository.searchDocuments(keywords, {
+            domain,
+            topN,
+            contextWindow: config.chunk.contextWindowSize
+          });
+          
+          // 결과 캐싱
+          if (searchCache) {
+            searchCache.set(cacheKey, results);
+            console.error(`[DEBUG] Cached search result: ${cacheKey}`);
+          }
+        }
 
         const content: TextContent[] = [{
           type: 'text',
@@ -414,6 +617,83 @@ async function main() {
         }];
         
         return { content: textContent };
+      }
+
+      case 'get-cache-stats': {
+        const stats = searchCache ? searchCache.getStats() : null;
+        const watcherStatus = fileWatcher ? fileWatcher.getWatchingStatus() : null;
+        
+        const statsText = stats ? `
+## Search Cache Statistics
+
+- **Cache Size**: ${stats.size}/${stats.maxSize} entries
+- **Hit Rate**: ${(stats.hitRate * 100).toFixed(1)}% (${stats.hits} hits, ${stats.misses} misses)
+- **Oldest Entry**: ${stats.oldestEntry || 'N/A'}
+- **Newest Entry**: ${stats.newestEntry || 'N/A'}
+
+## File Watcher Status
+
+- **Active**: ${watcherStatus?.isWatching ? 'Yes' : 'No'}
+- **Watched Path**: ${watcherStatus?.watchedPath || 'N/A'}
+- **Watched Files**: ${watcherStatus?.watchedFiles || 0}
+
+## Server Status
+
+- **Hot Reload**: ${process.env.NODE_ENV !== 'production' ? 'Enabled' : 'Disabled'}
+- **Repository Status**: ${repository?.isInitialized() ? 'Initialized' : 'Not Initialized'}
+- **Total Documents**: ${repository?.getStatistics().totalDocuments || 0}
+- **Total Chunks**: ${repository?.getStatistics().totalChunks || 0}
+        ` : `
+## Cache Statistics
+
+Search cache is not initialized.
+
+## Server Status
+
+- **Hot Reload**: ${process.env.NODE_ENV !== 'production' ? 'Enabled' : 'Disabled'}
+- **Repository Status**: ${repository?.isInitialized() ? 'Initialized' : 'Not Initialized'}
+        `;
+
+        const content: TextContent[] = [{
+          type: 'text',
+          text: statsText.trim()
+        }];
+        
+        return { content };
+      }
+
+      case 'health-check': {
+        const { detailed } = args as { detailed?: boolean };
+        
+        if (!validationService) {
+          const content: TextContent[] = [{
+            type: 'text',
+            text: 'Validation service is not available.'
+          }];
+          return { content };
+        }
+
+        const healthCheck = await validationService.performHealthCheck(config, repository);
+        
+        let statusText = `# System Health Check\n\n**Status**: ${healthCheck.status.toUpperCase()}\n**Timestamp**: ${healthCheck.timestamp}\n\n`;
+        
+        // 각 체크 결과 표시
+        for (const [checkName, result] of Object.entries(healthCheck.checks)) {
+          const statusIcon = result.status === 'pass' ? '✅' : result.status === 'warn' ? '⚠️' : '❌';
+          statusText += `## ${checkName.charAt(0).toUpperCase() + checkName.slice(1)}\n`;
+          statusText += `${statusIcon} **${result.status.toUpperCase()}**: ${result.message}\n\n`;
+          
+          if (detailed && result.details) {
+            statusText += `**Details**:\n\`\`\`json\n${JSON.stringify(result.details, null, 2)}\n\`\`\`\n\n`;
+          }
+        }
+
+        const content: TextContent[] = [{
+          type: 'text',
+          text: statusText.trim()
+        }];
+        
+        return { content };
       }
 
       default:

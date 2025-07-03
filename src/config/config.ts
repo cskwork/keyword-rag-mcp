@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import type { DocumentSource } from '../services/DocumentLoader.js';
 import { CategoryMappingService } from '../services/CategoryMappingService.js';
 import { DomainDiscoveryService } from '../services/DomainDiscoveryService.js';
+import { ValidationService } from '../services/ValidationService.js';
 import { ConfigError, ConfigFileError, ConfigValidationError } from './ConfigError.js';
 
 // 환경 변수 로드
@@ -18,6 +19,7 @@ const __dirname = path.dirname(__filename);
 // 서비스 인스턴스 생성
 const categoryMappingService = new CategoryMappingService();
 const domainDiscoveryService = new DomainDiscoveryService(categoryMappingService);
+const validationService = new ValidationService();
 
 const defaultDomains = [
   { name: 'company', path: 'company', category: '회사정보' },
@@ -80,6 +82,22 @@ export async function loadConfig(): Promise<Config> {
     
     // 경로 처리
     const finalConfig = await processBasePath(processedConfig);
+    
+    // 설정 검증
+    const validation = validationService.validateConfig(finalConfig);
+    if (!validation.isValid) {
+      console.error(`[WARNING] Configuration validation failed:`);
+      validation.errors.forEach(error => console.error(`  ERROR: ${error}`));
+      validation.warnings.forEach(warning => console.error(`  WARNING: ${warning}`));
+      
+      // 치명적 오류가 있으면 예외 발생
+      if (validation.errors.length > 0) {
+        throw new ConfigValidationError('config', validation.errors.join(', '));
+      }
+    } else if (validation.warnings.length > 0) {
+      console.error(`[INFO] Configuration warnings:`);
+      validation.warnings.forEach(warning => console.error(`  WARNING: ${warning}`));
+    }
     
     return finalConfig;
   } catch (error) {
