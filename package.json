@@ -1,0 +1,39 @@
+{
+  "name": "mcp-knowledge-retrieval",
+  "version": "1.0.0",
+  "description": "MCP server for retrieving company and customer domain knowledge",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "mcp-knowledge-retrieval": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "jest",
+    "lint": "eslint src --ext .ts"
+  },
+  "keywords": ["mcp", "knowledge", "retrieval", "bm25"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "unified": "^11.0.0",
+    "remark-parse": "^11.0.0",
+    "unist-util-visit": "^5.0.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.55.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.11",
+    "ts-jest": "^29.1.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+} 

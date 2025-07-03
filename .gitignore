@@ -1,0 +1,29 @@
+# 종속성
+node_modules/
+
+# 빌드 출력
+dist/
+build/
+
+# 환경 변수
+.env
+.env.local
+
+# 로그
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 테스트
+coverage/
+
+# 임시 파일
+*.tmp
+temp/ 
