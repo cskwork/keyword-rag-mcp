@@ -1,9 +1,8 @@
 import { TextContent } from '@modelcontextprotocol/sdk/types.js';
 import { ServerStateManager } from '../server/ServerStateManager.js';
-import { createSearchCacheKey } from '../services/CacheService.js';
 
 /**
- * 검색 관련 MCP 도구 핸들러
+ * 간소화된 검색 핸들러 (캐시와 분석 제거)
  */
 export class SearchHandler {
   private stateManager: ServerStateManager;
@@ -13,14 +12,12 @@ export class SearchHandler {
   }
 
   /**
-   * 문서 검색 도구 처리
+   * 문서 검색 도구 처리 (간소화됨)
    */
   async handleSearchDocuments(args: any): Promise<{ content: TextContent[] }> {
     await this.stateManager.ensureServerReady();
 
     const repository = this.stateManager.repository!;
-    const searchCache = this.stateManager.searchCache!;
-    const analyticsService = this.stateManager.analyticsService!;
 
     // 파라미터 검증
     if (!args.keywords || !Array.isArray(args.keywords) || args.keywords.length === 0) {
@@ -34,25 +31,11 @@ export class SearchHandler {
     console.error(`[DEBUG] 검색 요청: keywords=${JSON.stringify(keywords)}, domain=${domain}, limit=${limit}`);
 
     try {
-      // 캐시 확인
-      const cacheKey = createSearchCacheKey(keywords, domain, limit);
-      const cachedResult = searchCache.get(cacheKey);
-      if (cachedResult) {
-        console.error(`[DEBUG] 캐시에서 검색 결과 반환`);
-        await analyticsService.recordSearchQuery(keywords, domain, limit, cachedResult.length, 0, true);
-        return { content: [{ type: 'text', text: JSON.stringify(cachedResult, null, 2) }] };
-      }
-
-      // 검색 실행
+      // 검색 실행 (캐시 없이 직접 실행)
       const searchResultsText = await repository.searchDocuments(keywords, { domain, topN: limit });
       const searchResults = JSON.parse(searchResultsText || '[]');
+      
       console.error(`[DEBUG] 검색 완료: ${searchResults.length}개 결과 발견`);
-
-      // 캐시에 저장
-      searchCache.set(cacheKey, searchResults);
-
-      // 분석 기록
-      await analyticsService.recordSearchQuery(keywords, domain, limit, searchResults.length, 0, false);
 
       const response = {
         results: searchResults,

@@ -13,7 +13,7 @@ export function splitMarkdownIntoChunks(markdown: string, maxDepth: number = 2):
   const tree = unified().use(remarkParse).parse(markdown) as Root;
   const chunks: string[] = [];
   let currentChunk: string[] = [];
-  const currentPosition = 0;
+  // Position tracking removed for simplicity
 
   // 마크다운을 줄 단위로 분할
   const lines = markdown.split('\n');
@@ -116,7 +116,7 @@ export function extractMetadata(markdown: string): {
   description: string;
   keywords: string[];
 } {
-  const lines = markdown.split('\n');
+  // Line processing simplified
   let title = '';
   let description = '';
   const keywords: string[] = [];

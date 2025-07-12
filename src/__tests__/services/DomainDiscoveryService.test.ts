@@ -1,21 +1,21 @@
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import { DomainDiscoveryService, Domain } from '../../services/DomainDiscoveryService.js';
 import { CategoryMappingService } from '../../services/CategoryMappingService.js';
-import { promises as fs } from 'fs';
-import * as fsSync from 'fs';
+import { promises as fs, existsSync, statSync } from 'fs';
 
 // 파일 시스템 모킹
 jest.mock('fs', () => ({
-  ...jest.requireActual('fs'),
   existsSync: jest.fn(),
   statSync: jest.fn(),
   promises: {
-    ...jest.requireActual('fs').promises,
     readdir: jest.fn(),
+    readFile: jest.fn(),
   },
 }));
 
-const mockedFs = fs as jest.Mocked<typeof fs>;
-const mockedFsSync = fsSync as jest.Mocked<typeof fsSync>;
+const mockedFs = jest.mocked(fs, true);
+const mockedExistsSync = jest.mocked(existsSync, true);
+const mockedStatSync = jest.mocked(statSync, true);
 
 describe('DomainDiscoveryService', () => {
   let service: DomainDiscoveryService;
@@ -43,8 +43,8 @@ describe('DomainDiscoveryService', () => {
         { name: 'node_modules', isDirectory: () => true }, // 시스템 폴더
       ];
 
-      mockedFsSync.existsSync.mockReturnValue(true);
-      mockedFsSync.statSync.mockReturnValue({ isDirectory: () => true } as any);
+      mockedExistsSync.mockReturnValue(true);
+      mockedStatSync.mockReturnValue({ isDirectory: () => true } as any);
       mockedFs.readdir.mockResolvedValue(mockDirEntries as any);
       
       mockCategoryService.loadMapping.mockResolvedValue({
@@ -71,7 +71,7 @@ describe('DomainDiscoveryService', () => {
     });
 
     test('should handle invalid base path gracefully', async () => {
-      mockedFsSync.existsSync.mockReturnValue(false);
+      mockedExistsSync.mockReturnValue(false);
 
       const domains = await service.discoverDomains('/invalid/path');
 
@@ -79,8 +79,8 @@ describe('DomainDiscoveryService', () => {
     });
 
     test('should handle directory read errors gracefully', async () => {
-      mockedFsSync.existsSync.mockReturnValue(true);
-      mockedFsSync.statSync.mockReturnValue({ isDirectory: () => true } as any);
+      mockedExistsSync.mockReturnValue(true);
+      mockedStatSync.mockReturnValue({ isDirectory: () => true } as any);
       mockedFs.readdir.mockRejectedValue(new Error('Permission denied'));
 
       const domains = await service.discoverDomains('/test/docs');
@@ -96,8 +96,8 @@ describe('DomainDiscoveryService', () => {
         { name: '123domain', isDirectory: () => true }, // 숫자로 시작
       ];
 
-      mockedFsSync.existsSync.mockReturnValue(true);
-      mockedFsSync.statSync.mockReturnValue({ isDirectory: () => true } as any);
+      mockedExistsSync.mockReturnValue(true);
+      mockedStatSync.mockReturnValue({ isDirectory: () => true } as any);
       mockedFs.readdir.mockResolvedValue(mockDirEntries as any);
       
       mockCategoryService.loadMapping.mockResolvedValue({});
@@ -119,8 +119,8 @@ describe('DomainDiscoveryService', () => {
         { name: 'product', isDirectory: () => true },
       ];
 
-      mockedFsSync.existsSync.mockReturnValue(true);
-      mockedFsSync.statSync.mockReturnValue({ isDirectory: () => true } as any);
+      mockedExistsSync.mockReturnValue(true);
+      mockedStatSync.mockReturnValue({ isDirectory: () => true } as any);
       mockedFs.readdir.mockResolvedValue(mockDirEntries as any);
       
       mockCategoryService.loadMapping.mockResolvedValue({});
@@ -138,8 +138,8 @@ describe('DomainDiscoveryService', () => {
         { name: 'Product-Test', isDirectory: () => true },
       ];
 
-      mockedFsSync.existsSync.mockReturnValue(true);
-      mockedFsSync.statSync.mockReturnValue({ isDirectory: () => true } as any);
+      mockedExistsSync.mockReturnValue(true);
+      mockedStatSync.mockReturnValue({ isDirectory: () => true } as any);
       mockedFs.readdir.mockResolvedValue(mockDirEntries as any);
       
       mockCategoryService.loadMapping.mockResolvedValue({});

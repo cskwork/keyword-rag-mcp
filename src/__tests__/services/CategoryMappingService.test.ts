@@ -1,20 +1,17 @@
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import { CategoryMappingService } from '../../services/CategoryMappingService.js';
-import { promises as fs } from 'fs';
-import * as fsSync from 'fs';
-import path from 'path';
+import { promises as fs, existsSync } from 'fs';
 
 // 파일 시스템 모킹
 jest.mock('fs', () => ({
-  ...jest.requireActual('fs'),
   existsSync: jest.fn(),
   promises: {
-    ...jest.requireActual('fs').promises,
     readFile: jest.fn(),
   },
 }));
 
-const mockedFs = fs as jest.Mocked<typeof fs>;
-const mockedFsSync = fsSync as jest.Mocked<typeof fsSync>;
+const mockedFs = jest.mocked(fs, true);
+const mockedExistsSync = jest.mocked(existsSync, true);
 
 describe('CategoryMappingService', () => {
   let service: CategoryMappingService;
@@ -26,7 +23,7 @@ describe('CategoryMappingService', () => {
 
   describe('loadMapping', () => {
     test('should return default mapping when no custom file exists', async () => {
-      mockedFsSync.existsSync.mockReturnValue(false);
+      mockedExistsSync.mockReturnValue(false);
 
       const mapping = await service.loadMapping('/test/docs');
 
@@ -40,7 +37,7 @@ describe('CategoryMappingService', () => {
         company: '회사' // 기본값 덮어쓰기
       };
 
-      mockedFsSync.existsSync.mockReturnValue(true);
+      mockedExistsSync.mockReturnValue(true);
       mockedFs.readFile.mockResolvedValue(JSON.stringify(customMapping));
 
       const mapping = await service.loadMapping('/test/docs');
@@ -51,16 +48,16 @@ describe('CategoryMappingService', () => {
     });
 
     test('should cache mapping results', async () => {
-      mockedFsSync.existsSync.mockReturnValue(false);
+      mockedExistsSync.mockReturnValue(false);
 
       await service.loadMapping('/test/docs');
       await service.loadMapping('/test/docs');
 
-      expect(mockedFsSync.existsSync).toHaveBeenCalledTimes(1);
+      expect(mockedExistsSync).toHaveBeenCalledTimes(1);
     });
 
     test('should handle JSON parsing errors gracefully', async () => {
-      mockedFsSync.existsSync.mockReturnValue(true);
+      mockedExistsSync.mockReturnValue(true);
       mockedFs.readFile.mockResolvedValue('invalid json');
 
       const mapping = await service.loadMapping('/test/docs');
@@ -71,7 +68,7 @@ describe('CategoryMappingService', () => {
     });
 
     test('should handle file read errors gracefully', async () => {
-      mockedFsSync.existsSync.mockReturnValue(true);
+      mockedExistsSync.mockReturnValue(true);
       mockedFs.readFile.mockRejectedValue(new Error('File read error'));
 
       const mapping = await service.loadMapping('/test/docs');
@@ -88,7 +85,7 @@ describe('CategoryMappingService', () => {
         'valid_key': 123 // 값이 숫자
       };
 
-      mockedFsSync.existsSync.mockReturnValue(true);
+      mockedExistsSync.mockReturnValue(true);
       mockedFs.readFile.mockResolvedValue(JSON.stringify(invalidMapping));
 
       const mapping = await service.loadMapping('/test/docs');
@@ -116,13 +113,13 @@ describe('CategoryMappingService', () => {
 
   describe('clearCache', () => {
     test('should clear cached mappings', async () => {
-      mockedFsSync.existsSync.mockReturnValue(false);
+      mockedExistsSync.mockReturnValue(false);
 
       await service.loadMapping('/test/docs');
       service.clearCache();
       await service.loadMapping('/test/docs');
 
-      expect(mockedFsSync.existsSync).toHaveBeenCalledTimes(2);
+      expect(mockedExistsSync).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -9,7 +9,7 @@ import {
 import { ProcessManager } from './ProcessManager.js';
 import { ServerStateManager } from './ServerStateManager.js';
 import { ServerInitializer } from './ServerInitializer.js';
-import { FileWatcherManager } from './FileWatcherManager.js';
+// Removed FileWatcherManager - simplified
 import { SearchHandler } from '../handlers/SearchHandler.js';
 import { DocumentHandler } from '../handlers/DocumentHandler.js';
 import { SystemHandler } from '../handlers/SystemHandler.js';
@@ -21,7 +21,7 @@ export class McpServer {
   private server: Server;
   private stateManager: ServerStateManager;
   private serverInitializer: ServerInitializer;
-  private fileWatcherManager: FileWatcherManager;
+  // Removed FileWatcherManager - simplified
   private searchHandler: SearchHandler;
   private documentHandler: DocumentHandler;
   private systemHandler: SystemHandler;
@@ -42,7 +42,7 @@ export class McpServer {
     // 상태 관리자 및 핸들러 초기화
     this.stateManager = ServerStateManager.getInstance();
     this.serverInitializer = new ServerInitializer();
-    this.fileWatcherManager = new FileWatcherManager();
+    // Removed FileWatcherManager initialization
     this.searchHandler = new SearchHandler();
     this.documentHandler = new DocumentHandler();
     this.systemHandler = new SystemHandler();
@@ -223,16 +223,19 @@ export class McpServer {
             return await this.systemHandler.handleHealthCheck();
 
           case 'get-cache-stats':
-            return await this.systemHandler.handleGetCacheStats();
+            // Removed cache stats - simplified
+            return { content: [{ type: 'text', text: 'Cache disabled for simplicity' }] };
 
           case 'get-search-analytics':
-            return await this.systemHandler.handleGetSearchAnalytics(args);
+            // Removed analytics - simplified  
+            return { content: [{ type: 'text', text: 'Analytics disabled for simplicity' }] };
 
           case 'get-document-metadata':
             return await this.documentHandler.handleGetDocumentMetadata(args);
 
           case 'get-system-metrics':
-            return await this.systemHandler.handleGetSystemMetrics();
+            // Use existing method
+            return await this.systemHandler.handleGetStatistics();
 
           default:
             throw new Error(`알 수 없는 도구: ${name}`);
@@ -266,10 +269,7 @@ export class McpServer {
       // 서버 초기화
       await this.serverInitializer.initializeServer();
 
-      // 파일 감시 설정 (개발 모드에서만)
-      if (process.env.NODE_ENV === 'development' || process.env.HOT_RELOAD === 'true') {
-        await this.fileWatcherManager.setupFileWatcher();
-      }
+      // 파일 감시 제거됨 (간소화)
 
       // 서버 연결
       const transport = new StdioServerTransport();
@@ -290,8 +290,7 @@ export class McpServer {
     try {
       console.error(`[DEBUG] MCP 서버 정지 중...`);
 
-      // 파일 감시 중지
-      await this.fileWatcherManager.stopFileWatcher();
+      // 파일 감시 제거됨 (간소화)
 
       // 서버 연결 해제
       await this.server.close();

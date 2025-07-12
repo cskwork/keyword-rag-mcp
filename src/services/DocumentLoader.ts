@@ -3,7 +3,6 @@ import * as fsSync from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { KnowledgeDocument, createRemoteMarkdownDocument } from '../models/Document.js';
-import { DocumentPreprocessor } from './DocumentPreprocessor.js';
 
 export interface DocumentSource {
   type: 'local' | 'remote';
@@ -16,17 +15,24 @@ export interface DocumentSource {
 }
 
 /**
- * 문서 로더
- * 로컬 파일 시스템 또는 원격 URL에서 마크다운 문서를 로드
+ * 간소화된 문서 메타데이터
+ */
+interface SimpleDocumentMetadata {
+  title: string;
+  description?: string;
+  wordCount: number;
+  keywords: string[];
+}
+
+/**
+ * 간소화된 문서 로더 (전처리 통합)
+ * 로컬 파일 시스템 또는 원격 URL에서 마크다운 문서를 로드하고 기본 전처리 수행
  */
 export class DocumentLoader {
   private documents: KnowledgeDocument[] = [];
   private documentIdCounter = 0;
-  private preprocessor: DocumentPreprocessor;
 
-  constructor(private readonly source: DocumentSource) {
-    this.preprocessor = new DocumentPreprocessor();
-  }
+  constructor(private readonly source: DocumentSource) {}
 
   /**
    * 모든 문서 로드
@@ -82,7 +88,7 @@ export class DocumentLoader {
           // 하위 디렉토리 재귀적 탐색
           await this.loadLocalDocuments(fullPath, domainName, category);
         } else if (entry.isFile() && this.isMarkdownFile(entry.name)) {
-          // 마크다운 파일 로드
+          // 마크다운 파일 로드 및 전처리
           const content = await fs.readFile(fullPath, 'utf-8');
           const document = await this.createDocument(
             content,
@@ -95,33 +101,30 @@ export class DocumentLoader {
       }
     } catch (error) {
       console.error(`[DEBUG] Failed to load local documents from ${dirPath}:`, (error as Error).message);
-      console.error(`[DEBUG] Working directory: ${process.cwd()}`);
-      console.error(`[DEBUG] Directory exists: ${fsSync.existsSync(dirPath)}`);
       // Failed to load documents (silent for MCP protocol)
     }
   }
 
   /**
-   * 원격 URL에서 문서 로드
+   * 원격 소스에서 문서 로드 (llms.txt 형식)
    */
   private async loadRemoteDocuments(
-    baseUrl: string,
+    remotePath: string,
     domainName: string,
     category?: string
   ): Promise<void> {
     try {
-      // llms.txt 파일 로드 시도
-      const llmsUrl = `${baseUrl}/llms.txt`;
-      const response = await axios.get(llmsUrl);
-      const llmsContent = response.data;
+      console.error(`[DEBUG] Loading remote documents from: ${remotePath}`);
+      
+      const response = await axios.get(remotePath, { timeout: 10000 });
+      const llmsTxtContent = response.data;
+      
+      const docUrls = this.parseLlmsTxt(llmsTxtContent);
+      console.error(`[DEBUG] Found ${docUrls.length} document URLs in llms.txt`);
 
-      // llms.txt 파싱하여 문서 URL 추출
-      const documentUrls = this.parseLlmsTxt(llmsContent, baseUrl);
-
-      // 각 문서 로드
-      for (const docUrl of documentUrls) {
+      for (const docUrl of docUrls) {
         try {
-          const docResponse = await axios.get(docUrl);
+          const docResponse = await axios.get(docUrl, { timeout: 10000 });
           const content = docResponse.data;
           const document = await this.createDocument(
             content,
@@ -130,32 +133,127 @@ export class DocumentLoader {
             category
           );
           this.documents.push(document);
-        } catch (error) {
-          console.error(`[DEBUG] Failed to load remote document ${docUrl}:`, (error as Error).message);
-          // Failed to load document (silent for MCP protocol)
+        } catch (docError) {
+          console.error(`[DEBUG] Failed to load document from ${docUrl}:`, (docError as Error).message);
         }
       }
     } catch (error) {
-      console.error(`[DEBUG] Failed to load remote documents from ${baseUrl}:`, (error as Error).message);
-      // Failed to load documents (silent for MCP protocol)
+      console.error(`[DEBUG] Failed to load remote documents from ${remotePath}:`, (error as Error).message);
     }
   }
 
   /**
-   * llms.txt 파싱
+   * 문서 생성 및 간소화된 전처리 수행
    */
-  private parseLlmsTxt(content: string, baseUrl: string): string[] {
-    const urls: string[] = [];
-    const lines = content.split('\n');
+  private async createDocument(
+    content: string,
+    link: string,
+    domainName: string,
+    category?: string
+  ): Promise<KnowledgeDocument> {
+    try {
+      // 간소화된 전처리 수행
+      const processed = this.simplePreprocess(content, link);
+      
+      // RemoteMarkdownDocument 생성
+      const remoteDoc = createRemoteMarkdownDocument(
+        `doc-${this.documentIdCounter}`,
+        link,
+        content
+      );
 
+      // 전처리된 메타데이터 통합
+      if (remoteDoc.metadata) {
+        remoteDoc.metadata.keywords = [
+          ...new Set([
+            ...remoteDoc.metadata.keywords,
+            ...processed.keywords
+          ])
+        ];
+        remoteDoc.metadata.description = processed.description || remoteDoc.metadata.description;
+      }
+
+      // KnowledgeDocument로 래핑
+      const document = new KnowledgeDocument(
+        remoteDoc,
+        this.documentIdCounter++,
+        domainName
+      );
+
+      console.error(`[DEBUG] Created document: ${processed.title} (${processed.wordCount} words) in domain ${domainName}`);
+      return document;
+
+    } catch (error) {
+      console.error(`[DEBUG] Failed to create document from ${link}:`, (error as Error).message);
+      
+      // 기본 문서라도 생성
+      const remoteDoc = createRemoteMarkdownDocument(
+        `doc-${this.documentIdCounter}`,
+        link,
+        content
+      );
+
+      return new KnowledgeDocument(
+        remoteDoc,
+        this.documentIdCounter++,
+        domainName
+      );
+    }
+  }
+
+  /**
+   * 간소화된 문서 전처리 (복잡한 메타데이터 추출 제거)
+   */
+  private simplePreprocess(content: string, filePath: string): SimpleDocumentMetadata {
+    // 제목 추출 (첫 번째 H1 또는 파일명)
+    const titleMatch = content.match(/^#\s+(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : path.basename(filePath, path.extname(filePath));
+
+    // 설명 추출 (첫 번째 문단)
+    const descMatch = content.match(/^(?!#)(.+)$/m);
+    const description = descMatch ? descMatch[1].trim().substring(0, 200) : undefined;
+
+    // 단어 수 계산
+    const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
+
+    // 간단한 키워드 추출 (제목과 헤딩에서)
+    const keywords: string[] = [];
+    
+    // 제목에서 키워드
+    if (title) {
+      keywords.push(...title.toLowerCase().split(/\s+/).filter(word => word.length > 2));
+    }
+
+    // 모든 헤딩에서 키워드
+    const headingMatches = content.match(/^#{1,6}\s+(.+)$/gm) || [];
+    headingMatches.forEach(heading => {
+      const text = heading.replace(/^#+\s+/, '').toLowerCase();
+      keywords.push(...text.split(/\s+/).filter(word => word.length > 2));
+    });
+
+    // 중복 제거 및 상위 10개만
+    const uniqueKeywords = [...new Set(keywords)].slice(0, 10);
+
+    return {
+      title,
+      description,
+      wordCount,
+      keywords: uniqueKeywords
+    };
+  }
+
+  /**
+   * llms.txt 파일 파싱
+   */
+  private parseLlmsTxt(content: string): string[] {
+    const lines = content.split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0 && !line.startsWith('#'));
+
+    const urls: string[] = [];
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith('#')) {
-        // 상대 경로를 절대 경로로 변환
-        const url = trimmed.startsWith('http') 
-          ? trimmed 
-          : `${baseUrl}/${trimmed}`;
-        urls.push(url);
+      if (line.startsWith('http://') || line.startsWith('https://')) {
+        urls.push(line);
       }
     }
 
@@ -171,83 +269,16 @@ export class DocumentLoader {
   }
 
   /**
-   * 문서 객체 생성 (전처리 포함)
-   */
-  private async createDocument(
-    content: string,
-    link: string,
-    domainName: string,
-    category?: string
-  ): Promise<KnowledgeDocument> {
-    try {
-      // 문서 전처리 수행
-      const preprocessed = await this.preprocessor.preprocessDocument(link, content, domainName);
-      
-      // RemoteMarkdownDocument 생성
-      const remoteDoc = createRemoteMarkdownDocument(
-        `doc-${this.documentIdCounter}`,
-        link,
-        content
-      );
-
-      // 전처리된 메타데이터 통합
-      if (remoteDoc.metadata) {
-        remoteDoc.metadata.preprocessed = preprocessed.metadata;
-        // 키워드 병합 (기존 + 전처리)
-        remoteDoc.metadata.keywords = [
-          ...new Set([
-            ...remoteDoc.metadata.keywords,
-            ...preprocessed.keywords
-          ])
-        ];
-        // 설명 업데이트 (전처리 결과가 더 상세함)
-        if (preprocessed.metadata.description) {
-          remoteDoc.metadata.description = preprocessed.metadata.description;
-        }
-      }
-
-      const document = new KnowledgeDocument(
-        remoteDoc,
-        this.documentIdCounter++,
-        domainName
-      );
-
-      console.error(`[DEBUG] Created preprocessed document: ID=${document.id}, title=${document.title}, domainName=${document.domainName}, keywords=${document.keywords.length}, wordCount=${preprocessed.metadata.wordCount}`);
-
-      return document;
-    } catch (error) {
-      console.error(`[DEBUG] Error in preprocessing document ${link}: ${(error as Error).message}`);
-      
-      // 전처리 실패시 기본 방식으로 폴백
-      const remoteDoc = createRemoteMarkdownDocument(
-        `doc-${this.documentIdCounter}`,
-        link,
-        content
-      );
-
-      const document = new KnowledgeDocument(
-        remoteDoc,
-        this.documentIdCounter++,
-        domainName
-      );
-
-      console.error(`[DEBUG] Created fallback document: ID=${document.id}, title=${document.title}, domainName=${document.domainName}`);
-
-      return document;
-    }
-  }
-
-  /**
-   * 로드된 문서 개수
+   * 로드된 문서 수 반환
    */
   getDocumentCount(): number {
     return this.documents.length;
   }
 
   /**
-   * 로드된 문서 목록
+   * 특정 도메인의 문서 수 반환
    */
-  getDocuments(): KnowledgeDocument[] {
-    return this.documents;
+  getDomainDocumentCount(domainName: string): number {
+    return this.documents.filter(doc => doc.domainName === domainName).length;
   }
-} 
+}

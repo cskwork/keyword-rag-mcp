@@ -1,22 +1,14 @@
 import { DocumentRepository } from '../services/DocumentRepository.js';
-import { FileWatcherService } from '../services/FileWatcherService.js';
-import { CacheService } from '../services/CacheService.js';
-import { ValidationService } from '../services/ValidationService.js';
-import { AnalyticsService } from '../services/AnalyticsService.js';
 
 /**
- * 서버 상태 관리자 - 전역 상태 및 서비스 인스턴스 관리
+ * 간소화된 서버 상태 관리자 - 필수 서비스만 관리
  */
 export class ServerStateManager {
   private static instance: ServerStateManager;
   
-  // 서비스 인스턴스들
+  // 필수 서비스만 유지
   private _repository: DocumentRepository | null = null;
   private _config: any = null;
-  private _fileWatcher: FileWatcherService | null = null;
-  private _searchCache: CacheService<any> | null = null;
-  private _validationService: ValidationService | null = null;
-  private _analyticsService: AnalyticsService | null = null;
   
   // 상태 플래그들
   private _isInitialized = false;
@@ -36,29 +28,13 @@ export class ServerStateManager {
     return ServerStateManager.instance;
   }
 
-  // Getters
+  // Getters (필수 서비스만)
   get repository(): DocumentRepository | null {
     return this._repository;
   }
 
   get config(): any {
     return this._config;
-  }
-
-  get fileWatcher(): FileWatcherService | null {
-    return this._fileWatcher;
-  }
-
-  get searchCache(): CacheService<any> | null {
-    return this._searchCache;
-  }
-
-  get validationService(): ValidationService | null {
-    return this._validationService;
-  }
-
-  get analyticsService(): AnalyticsService | null {
-    return this._analyticsService;
   }
 
   get isInitialized(): boolean {
@@ -69,7 +45,7 @@ export class ServerStateManager {
     return this._isInitializing;
   }
 
-  // Setters
+  // Setters (필수 서비스만)
   setRepository(repository: DocumentRepository): void {
     this._repository = repository;
     console.error(`[DEBUG] Repository set in StateManager`);
@@ -78,26 +54,6 @@ export class ServerStateManager {
   setConfig(config: any): void {
     this._config = config;
     console.error(`[DEBUG] Config set in StateManager`);
-  }
-
-  setFileWatcher(fileWatcher: FileWatcherService): void {
-    this._fileWatcher = fileWatcher;
-    console.error(`[DEBUG] FileWatcher set in StateManager`);
-  }
-
-  setSearchCache(searchCache: CacheService<any>): void {
-    this._searchCache = searchCache;
-    console.error(`[DEBUG] SearchCache set in StateManager`);
-  }
-
-  setValidationService(validationService: ValidationService): void {
-    this._validationService = validationService;
-    console.error(`[DEBUG] ValidationService set in StateManager`);
-  }
-
-  setAnalyticsService(analyticsService: AnalyticsService): void {
-    this._analyticsService = analyticsService;
-    console.error(`[DEBUG] AnalyticsService set in StateManager`);
   }
 
   setInitializing(isInitializing: boolean): void {
@@ -111,7 +67,7 @@ export class ServerStateManager {
   }
 
   /**
-   * 서버 준비 상태 확인
+   * 서버 준비 상태 확인 (간소화됨)
    */
   async ensureServerReady(): Promise<void> {
     if (this._isInitialized && this._repository?.isInitialized()) {
@@ -141,16 +97,12 @@ export class ServerStateManager {
   }
 
   /**
-   * 모든 서비스 상태 확인
+   * 간소화된 서비스 상태 확인
    */
   getServicesStatus(): any {
     return {
       repository: !!this._repository && this._repository.isInitialized(),
       config: !!this._config,
-      fileWatcher: !!this._fileWatcher,
-      searchCache: !!this._searchCache,
-      validationService: !!this._validationService,
-      analyticsService: !!this._analyticsService,
       isInitialized: this._isInitialized,
       isInitializing: this._isInitializing,
       timestamp: new Date().toISOString()
@@ -163,10 +115,6 @@ export class ServerStateManager {
   reset(): void {
     this._repository = null;
     this._config = null;
-    this._fileWatcher = null;
-    this._searchCache = null;
-    this._validationService = null;
-    this._analyticsService = null;
     this._isInitialized = false;
     this._isInitializing = false;
     console.error(`[DEBUG] ServerStateManager reset`);

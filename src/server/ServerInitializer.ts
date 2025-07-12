@@ -1,13 +1,10 @@
 import { loadConfig } from '../config/config.js';
 import { DocumentLoader } from '../services/DocumentLoader.js';
 import { DocumentRepository } from '../services/DocumentRepository.js';
-import { CacheService } from '../services/CacheService.js';
-import { ValidationService } from '../services/ValidationService.js';
-import { AnalyticsService } from '../services/AnalyticsService.js';
 import { ServerStateManager } from './ServerStateManager.js';
 
 /**
- * 서버 초기화 관리자 - 모든 서비스 초기화 및 설정 로드
+ * 간소화된 서버 초기화 관리자 - 필수 서비스만 초기화
  */
 export class ServerInitializer {
   private stateManager: ServerStateManager;
@@ -17,7 +14,7 @@ export class ServerInitializer {
   }
 
   /**
-   * MCP 서버 초기화 메인 프로세스
+   * 간소화된 MCP 서버 초기화
    */
   async initializeServer(): Promise<void> {
     console.error(`[DEBUG] initializeServer() started, isInitialized=${this.stateManager.isInitialized}, isInitializing=${this.stateManager.isInitializing}`);
@@ -40,17 +37,14 @@ export class ServerInitializer {
     try {
       console.error(`[DEBUG] Starting server initialization...`);
       
-      // 1. 설정 로드
+      // 1. 설정 로드 (자동 config.json 생성 포함)
       await this.loadConfiguration();
       
-      // 2. 서비스 초기화
-      await this.initializeServices();
+      // 2. 문서 저장소 초기화
+      await this.initializeRepository();
       
       // 3. 문서 로드 및 인덱싱
       await this.loadAndIndexDocuments();
-      
-      // 4. 검증
-      await this.validateInitialization();
       
       this.stateManager.setInitialized(true);
       console.error(`[DEBUG] Server initialization completed successfully`);
@@ -65,17 +59,17 @@ export class ServerInitializer {
   }
 
   /**
-   * 설정 로드
+   * 설정 로드 (자동 생성 포함)
    */
   private async loadConfiguration(): Promise<void> {
     console.error(`[DEBUG] Loading configuration...`);
     
     try {
-      const config = await loadConfig();
+      const config = await loadConfig(); // 자동으로 config.json 생성됨
       this.stateManager.setConfig(config);
       console.error(`[DEBUG] Configuration loaded successfully`);
       console.error(`[DEBUG] Base path: ${config.documentSource.basePath}`);
-      console.error(`[DEBUG] Auto discover: ${config.documentSource.autoDiscovery}`);
+      console.error(`[DEBUG] Auto discovery: ${config.documentSource.autoDiscovery}`);
       console.error(`[DEBUG] Domains count: ${config.documentSource.domains.length}`);
     } catch (error) {
       console.error(`[ERROR] Failed to load configuration: ${error}`);
@@ -84,42 +78,18 @@ export class ServerInitializer {
   }
 
   /**
-   * 서비스 초기화
+   * 문서 저장소 초기화 (단순화됨)
    */
-  private async initializeServices(): Promise<void> {
-    console.error(`[DEBUG] Initializing services...`);
+  private async initializeRepository(): Promise<void> {
+    console.error(`[DEBUG] Initializing document repository...`);
     
-    const config = this.stateManager.config;
-    if (!config) {
-      throw new Error('Configuration not loaded');
-    }
-
     try {
-      // 캐시 서비스 초기화
-      const searchCache = new CacheService<any>(
-        config.cache?.maxSize || 500
-      );
-      this.stateManager.setSearchCache(searchCache);
-      console.error(`[DEBUG] Search cache initialized with max size: ${config.cache?.maxSize || 500}`);
-
-      // 검증 서비스 초기화  
-      const validationService = new ValidationService();
-      this.stateManager.setValidationService(validationService);
-      console.error(`[DEBUG] Validation service initialized`);
-
-      // 분석 서비스 초기화
-      const analyticsService = new AnalyticsService();
-      this.stateManager.setAnalyticsService(analyticsService);
-      console.error(`[DEBUG] Analytics service initialized`);
-
-      // 문서 저장소 초기화
       const repository = new DocumentRepository();
       this.stateManager.setRepository(repository);
       console.error(`[DEBUG] Document repository initialized`);
-
     } catch (error) {
-      console.error(`[ERROR] Failed to initialize services: ${error}`);
-      throw new Error(`Service initialization failed: ${error}`);
+      console.error(`[ERROR] Failed to initialize repository: ${error}`);
+      throw new Error(`Repository initialization failed: ${error}`);
     }
   }
 
@@ -159,50 +129,15 @@ export class ServerInitializer {
 
       // 통계 정보 출력
       const stats = repository.getStatistics();
-      console.error(`[DEBUG] Repository statistics:`, JSON.stringify(stats, null, 2));
+      console.error(`[DEBUG] Repository statistics: Documents=${stats.totalDocuments}, Chunks=${stats.totalChunks}, Domains=${stats.domains.length}`);
 
-    } catch (error) {
-      console.error(`[ERROR] Failed to load and index documents: ${error}`);
-      throw new Error(`Document loading failed: ${error}`);
-    }
-  }
-
-  /**
-   * 초기화 검증
-   */
-  private async validateInitialization(): Promise<void> {
-    console.error(`[DEBUG] Validating initialization...`);
-    
-    const repository = this.stateManager.repository;
-    const validationService = this.stateManager.validationService;
-    
-    if (!repository || !validationService) {
-      throw new Error('Services not properly initialized');
-    }
-
-    try {
-      // 저장소 검증
-      if (!repository.isInitialized()) {
-        throw new Error('Repository not initialized');
-      }
-
-      const stats = repository.getStatistics();
       if (stats.totalDocuments === 0) {
         console.error(`[WARNING] No documents loaded. Check document paths and permissions.`);
       }
 
-      // 서비스 상태 검증
-      const healthCheck = await validationService.performHealthCheck();
-      
-      if (healthCheck.status !== 'healthy') {
-        console.error(`[WARNING] System health check: ${healthCheck.status}`);
-      }
-
-      console.error(`[DEBUG] Initialization validation passed`);
-
     } catch (error) {
-      console.error(`[ERROR] Initialization validation failed: ${error}`);
-      throw error;
+      console.error(`[ERROR] Failed to load and index documents: ${error}`);
+      throw new Error(`Document loading failed: ${error}`);
     }
   }
 

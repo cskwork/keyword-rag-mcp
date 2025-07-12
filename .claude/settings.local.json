@@ -11,7 +11,8 @@
       "Bash(timeout:*)",
       "Bash(npm run lint)",
       "Bash(npm run cli:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(DOCS_BASE_PATH=/tmp/test-docs npm run cli -- setup)"
     ],
     "deny": []
   }

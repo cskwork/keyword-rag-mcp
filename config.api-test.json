@@ -1,0 +1,27 @@
+{
+  "documentSources": [
+    {
+      "name": "company",
+      "path": "/Users/danny/Documents/Git/keyword-rag-mcp/api-test-docs/company",
+      "category": "Company Documentation"
+    },
+    {
+      "name": "technical",
+      "path": "/Users/danny/Documents/Git/keyword-rag-mcp/api-test-docs/technical",
+      "category": "Technical Guides"
+    },
+    {
+      "name": "customer",
+      "path": "/Users/danny/Documents/Git/keyword-rag-mcp/api-test-docs/customer",
+      "category": "Customer Support"
+    }
+  ],
+  "bm25Config": {
+    "k1": 1.2,
+    "b": 0.75
+  },
+  "chunkConfig": {
+    "minWords": 10,
+    "contextWindowSize": 3
+  }
+}
