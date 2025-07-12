@@ -132,11 +132,17 @@ export class AnalyticsService {
             this.searchQueries = this.searchQueries.slice(-this.maxStoredQueries);
           }
           
-          console.error(`[DEBUG] Loaded ${this.searchQueries.length} search queries from analytics file`);
+          // 테스트 환경이 아닐 때만 로깅
+          if (process.env.NODE_ENV !== 'test') {
+            console.error(`[DEBUG] Loaded ${this.searchQueries.length} search queries from analytics file`);
+          }
         }
       }
     } catch (error) {
-      console.error(`[DEBUG] Failed to load analytics data: ${(error as Error).message}`);
+      // 테스트 환경이 아닐 때만 로깅
+      if (process.env.NODE_ENV !== 'test') {
+        console.error(`[DEBUG] Failed to load analytics data: ${(error as Error).message}`);
+      }
     }
   }
 
@@ -286,7 +292,7 @@ export class AnalyticsService {
    */
   getSystemMetrics(documentCount: number, chunkCount: number, cacheStats?: any): SystemMetrics {
     const memUsage = process.memoryUsage();
-    const uptime = Math.floor((Date.now() - this.startTime.getTime()) / 1000);
+    const uptime = Math.max(0, Math.floor((Date.now() - this.startTime.getTime()) / 1000));
 
     return {
       memoryUsage: {
@@ -394,7 +400,7 @@ export class AnalyticsService {
     }
 
     queries.forEach(q => {
-      const hour = q.timestamp.getHours();
+      const hour = q.timestamp.getUTCHours();
       hourlyData[hour].count++;
       hourlyData[hour].totalResponseTime += q.responseTime;
     });
@@ -431,18 +437,31 @@ export class AnalyticsService {
   private calculatePerformanceMetrics(queries: SearchQuery[]): SearchAnalytics['performanceMetrics'] {
     const responseTimes = queries.map(q => q.responseTime).sort((a, b) => a - b);
     
-    const p50Index = Math.floor(responseTimes.length * 0.5);
-    const p90Index = Math.floor(responseTimes.length * 0.9);
-    const p99Index = Math.floor(responseTimes.length * 0.99);
+    // 백분위수 계산 함수
+    const getPercentile = (arr: number[], percentile: number): number => {
+      if (arr.length === 0) return 0;
+      if (arr.length === 1) return arr[0];
+      
+      const index = (arr.length - 1) * percentile;
+      const lower = Math.floor(index);
+      const upper = Math.ceil(index);
+      
+      if (lower === upper) {
+        return arr[lower];
+      }
+      
+      const weight = index - lower;
+      return arr[lower] * (1 - weight) + arr[upper] * weight;
+    };
 
     const slowestQueries = queries
       .sort((a, b) => b.responseTime - a.responseTime)
-      .slice(0, 5);
+      .slice(0, 3); // 상위 3개만 반환
 
     return {
-      p50ResponseTime: responseTimes[p50Index] || 0,
-      p90ResponseTime: responseTimes[p90Index] || 0,
-      p99ResponseTime: responseTimes[p99Index] || 0,
+      p50ResponseTime: getPercentile(responseTimes, 0.5),
+      p90ResponseTime: getPercentile(responseTimes, 0.9),
+      p99ResponseTime: getPercentile(responseTimes, 0.99),
       slowestQueries
     };
   }

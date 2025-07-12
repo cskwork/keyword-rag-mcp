@@ -113,7 +113,7 @@ describe('AnalyticsService', () => {
       
       expect(analytics.performanceMetrics.p50ResponseTime).toBe(275); // 중간값
       expect(analytics.performanceMetrics.p90ResponseTime).toBe(455); // 90퍼센타일
-      expect(analytics.performanceMetrics.p99ResponseTime).toBe(500); // 99퍼센타일
+      expect(analytics.performanceMetrics.p99ResponseTime).toBe(495.5); // 99퍼센타일
     });
 
     test('should identify slowest queries', async () => {

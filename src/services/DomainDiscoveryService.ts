@@ -122,8 +122,8 @@ export class DomainDiscoveryService {
       return false;
     }
 
-    // 유효한 도메인명 패턴 확인 (영숫자, 하이픈, 언더스코어만 허용)
-    if (!/^[a-zA-Z0-9_-]+$/.test(directoryName)) {
+    // 유효한 도메인명 패턴 확인 (영문자로 시작, 영숫자, 하이픈, 언더스코어만 허용)
+    if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(directoryName)) {
       return false;
     }
 

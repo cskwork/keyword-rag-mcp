@@ -1,0 +1,38 @@
+{
+  "documentsBasePath": "./tests/fixtures/docs",
+  "autoDiscoverDomains": true,
+  "domains": [
+    {
+      "name": "test-domain",
+      "path": "./tests/fixtures/docs/test",
+      "category": "test"
+    }
+  ],
+  "bm25": {
+    "k1": 1.0,
+    "b": 0.5
+  },
+  "chunking": {
+    "minWords": 10,
+    "contextWindowSize": 1
+  },
+  "cache": {
+    "maxSize": 100,
+    "ttl": 60000
+  },
+  "performance": {
+    "maxSearchResults": 10,
+    "indexBatchSize": 50
+  },
+  "logging": {
+    "level": "error",
+    "enableConsole": false,
+    "enableFile": false
+  },
+  "test": {
+    "hotReload": false,
+    "debugMode": false,
+    "mockData": true,
+    "fastInit": true
+  }
+}

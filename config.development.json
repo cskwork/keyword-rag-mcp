@@ -1,0 +1,31 @@
+{
+  "documentsBasePath": "./docs",
+  "autoDiscoverDomains": true,
+  "domains": [],
+  "bm25": {
+    "k1": 1.2,
+    "b": 0.75
+  },
+  "chunking": {
+    "minWords": 30,
+    "contextWindowSize": 2
+  },
+  "cache": {
+    "maxSize": 500,
+    "ttl": 3600000
+  },
+  "performance": {
+    "maxSearchResults": 50,
+    "indexBatchSize": 100
+  },
+  "logging": {
+    "level": "debug",
+    "enableConsole": true,
+    "enableFile": true
+  },
+  "development": {
+    "hotReload": true,
+    "debugMode": true,
+    "watchDebounceMs": 1000
+  }
+}

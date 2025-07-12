@@ -4,17 +4,15 @@ import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 
 // 파일 시스템 모킹
-jest.mock('fs');
-jest.mock('fs', () => ({
-  promises: {
-    readdir: jest.fn(),
-  },
-}));
 jest.mock('fs', () => ({
   ...jest.requireActual('fs'),
   existsSync: jest.fn(),
   statSync: jest.fn(),
-}), { virtual: true });
+  promises: {
+    ...jest.requireActual('fs').promises,
+    readdir: jest.fn(),
+  },
+}));
 
 const mockedFs = fs as jest.Mocked<typeof fs>;
 const mockedFsSync = fsSync as jest.Mocked<typeof fsSync>;

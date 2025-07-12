@@ -2,24 +2,18 @@ import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import { ValidationService } from '../../services/ValidationService.js';
 import * as fsSync from 'fs';
 
-// fs 모듈 모킹을 위한 객체
-const mockFsSync = {
+// fs 모듈 모킹
+jest.mock('fs', () => ({
+  ...jest.requireActual('fs'),
   existsSync: jest.fn(),
   statSync: jest.fn(),
   accessSync: jest.fn(),
   constants: {
     R_OK: 4
   }
-};
-
-// fs 모듈 모킹
-jest.unstable_mockModule('fs', () => ({
-  default: mockFsSync,
-  existsSync: mockFsSync.existsSync,
-  statSync: mockFsSync.statSync,
-  accessSync: mockFsSync.accessSync,
-  constants: mockFsSync.constants
 }));
+
+const mockFsSync = fsSync as jest.Mocked<typeof fsSync>;
 
 describe('ValidationService', () => {
   let service: ValidationService;
@@ -268,6 +262,13 @@ describe('ValidationService', () => {
 
   describe('performHealthCheck', () => {
     test('should return healthy status when all checks pass', async () => {
+      // 파일 시스템 모킹 설정
+      mockFsSync.existsSync.mockReturnValue(true);
+      mockFsSync.statSync.mockReturnValue({
+        isDirectory: () => true
+      });
+      mockFsSync.accessSync.mockImplementation(() => {}); // 접근 권한 OK
+
       const mockConfig = {
         serverName: 'test',
         serverVersion: '1.0.0',

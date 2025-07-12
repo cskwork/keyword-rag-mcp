@@ -10,7 +10,8 @@
       "Bash(rm:*)",
       "Bash(timeout:*)",
       "Bash(npm run lint)",
-      "Bash(npm run cli:*)"
+      "Bash(npm run cli:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }
