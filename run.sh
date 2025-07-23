@@ -12,6 +12,27 @@ echo "================================================"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "📁 작업 디렉토리: $SCRIPT_DIR"
 
+# MCP 서버 프로세스 클린업
+echo ""
+echo "🧹 기존 MCP 서버 프로세스 정리 중..."
+TMP_DIR=$(node -p "require('os').tmpdir()")
+PID_FILE="$TMP_DIR/mcp-knowledge-retrieval.pid"
+
+if [ -f "$PID_FILE" ]; then
+    EXISTING_PID=$(cat "$PID_FILE")
+    if ps -p "$EXISTING_PID" > /dev/null; then
+        echo "⚠️  실행 중인 프로세스(PID: $EXISTING_PID)를 종료합니다."
+        kill -9 "$EXISTING_PID" || true
+    else
+        echo "ⓘ 이전 PID 파일($EXISTING_PID)은 유효하지 않습니다."
+    fi
+    rm -f "$PID_FILE"
+    echo "✅ 이전 PID 파일이 삭제되었습니다."
+else
+    echo "✅ 실행 중인 프로세스가 없습니다."
+fi
+
+
 # Node.js 버전 확인
 echo ""
 echo "🔍 Node.js 버전 확인 중..."
