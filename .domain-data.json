@@ -1,0 +1,171 @@
+{
+  "domains": {
+    "business": {
+      "name": "business",
+      "displayName": "비즈니스 - business",
+      "description": "비즈니스 프로세스와 정책을 다루는 문서들",
+      "keywords": [
+        "추구합니다"
+      ],
+      "createdAt": "2025-07-22T01:52:00.165Z",
+      "lastUpdated": "2025-07-22T01:52:00.168Z",
+      "documentCount": 1
+    },
+    "api": {
+      "name": "api",
+      "displayName": "기술 문서 - api",
+      "description": "기술적 내용과 구현 세부사항을 다루는 문서들",
+      "keywords": [
+        "개발팀",
+        "클라우드",
+        "시스템",
+        "애플리케이션",
+        "테스트"
+      ],
+      "createdAt": "2025-07-22T01:52:00.184Z",
+      "lastUpdated": "2025-07-22T01:52:00.185Z",
+      "documentCount": 1
+    },
+    "api-1": {
+      "name": "api-1",
+      "displayName": "기술 문서 - api",
+      "description": "기술적 내용과 구현 세부사항을 다루는 문서들",
+      "keywords": [
+        "서비스",
+        "크레딧",
+        "sla",
+        "가용성",
+        "4시간"
+      ],
+      "createdAt": "2025-07-22T01:52:00.193Z",
+      "lastUpdated": "2025-07-22T01:52:00.194Z",
+      "documentCount": 1
+    },
+    "customer-support": {
+      "name": "customer-support",
+      "displayName": "고객 지원",
+      "description": "고객 지원, FAQ, 문제 해결 가이드",
+      "keywords": [
+        "techsolutions",
+        "com",
+        "1234",
+        "이메일",
+        "sales",
+        "담당자"
+      ],
+      "createdAt": "2025-07-22T01:52:00.202Z",
+      "lastUpdated": "2025-07-22T01:52:00.203Z",
+      "documentCount": 1
+    },
+    "api-2": {
+      "name": "api-2",
+      "displayName": "기술 문서 - api",
+      "description": "기술적 내용과 구현 세부사항을 다루는 문서들",
+      "keywords": [
+        "데이터",
+        "포함사항",
+        "gpu",
+        "클러스터",
+        "api",
+        "cpu",
+        "ram",
+        "스토리지"
+      ],
+      "createdAt": "2025-07-22T01:52:00.209Z",
+      "lastUpdated": "2025-07-22T01:52:00.223Z",
+      "documentCount": 2
+    },
+    "api-3": {
+      "name": "api-3",
+      "displayName": "기술 문서 - api",
+      "description": "기술적 내용과 구현 세부사항을 다루는 문서들",
+      "keywords": [
+        "프로젝트",
+        "비즈니스",
+        "react",
+        "데이터",
+        "시스템",
+        "서비스",
+        "프론트엔드",
+        "typescript",
+        "안정성",
+        "디자인"
+      ],
+      "createdAt": "2025-07-22T01:52:00.215Z",
+      "lastUpdated": "2025-07-22T01:52:00.215Z",
+      "documentCount": 1
+    },
+    "api-4": {
+      "name": "api-4",
+      "displayName": "기술 문서 - api",
+      "description": "기술적 내용과 구현 세부사항을 다루는 문서들",
+      "keywords": [
+        "app",
+        "name",
+        "myapp",
+        "docker",
+        "bash",
+        "run",
+        "yaml",
+        "compose",
+        "metadata",
+        "3000"
+      ],
+      "createdAt": "2025-07-22T01:52:00.227Z",
+      "lastUpdated": "2025-07-22T01:52:00.232Z",
+      "documentCount": 1
+    }
+  },
+  "mappings": {
+    "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/company/about.md": {
+      "filePath": "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/company/about.md",
+      "domainName": "business",
+      "confidence": 0.8,
+      "assignedAt": "2025-07-22T01:52:00.168Z"
+    },
+    "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/company/team.md": {
+      "filePath": "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/company/team.md",
+      "domainName": "api",
+      "confidence": 0.8,
+      "assignedAt": "2025-07-22T01:52:00.185Z"
+    },
+    "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/customer/sla.md": {
+      "filePath": "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/customer/sla.md",
+      "domainName": "api-1",
+      "confidence": 0.8,
+      "assignedAt": "2025-07-22T01:52:00.194Z"
+    },
+    "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/customer/support.md": {
+      "filePath": "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/customer/support.md",
+      "domainName": "customer-support",
+      "confidence": 0.8,
+      "assignedAt": "2025-07-22T01:52:00.203Z"
+    },
+    "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/product/ai-platform.md": {
+      "filePath": "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/product/ai-platform.md",
+      "domainName": "api-2",
+      "confidence": 0.8,
+      "assignedAt": "2025-07-22T01:52:00.209Z"
+    },
+    "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/product/web-app.md": {
+      "filePath": "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/product/web-app.md",
+      "domainName": "api-3",
+      "confidence": 0.8,
+      "assignedAt": "2025-07-22T01:52:00.215Z"
+    },
+    "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/technical/api-guide.md": {
+      "filePath": "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/technical/api-guide.md",
+      "domainName": "api-2",
+      "confidence": 1,
+      "assignedAt": "2025-07-22T01:52:00.223Z"
+    },
+    "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/technical/deployment.md": {
+      "filePath": "/Users/chaeseong-gug/Documents/PARA/Project/Github/Tools/Rag-Project/keyword-rag-mcp/docs/technical/deployment.md",
+      "domainName": "api-4",
+      "confidence": 0.8,
+      "assignedAt": "2025-07-22T01:52:00.232Z"
+    }
+  },
+  "lastUpdated": "2025-07-22T01:52:00.232Z",
+  "version": "1.0.0"
+}

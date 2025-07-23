@@ -14,7 +14,6 @@ export class DocumentRepository {
   private initializing: boolean = false;
 
   constructor() {
-    console.error(`[DEBUG] Repository constructor (${this.instanceId}): 초기화 대기 상태`);
   }
 
   /**
@@ -23,12 +22,10 @@ export class DocumentRepository {
    */
   async initialize(documents: KnowledgeDocument[]): Promise<void> {
     if (this.initialized) {
-      console.error(`[DEBUG] Repository (${this.instanceId}) already initialized`);
       return;
     }
 
     if (this.initializing) {
-      console.error(`[DEBUG] Repository (${this.instanceId}) already initializing, waiting...`);
       // 초기화 완료까지 대기
       while (this.initializing && !this.initialized) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -38,21 +35,15 @@ export class DocumentRepository {
 
     try {
       this.initializing = true;
-      console.error(`[DEBUG] Repository initialization started (${this.instanceId}): received ${documents.length} documents`);
-
       // 문서 저장
       documents.forEach(doc => {
-        console.error(`[DEBUG] Storing document: ID=${doc.id}, domainName=${doc.domainName}`);
         this.documents.set(doc.id, doc);
       });
-      console.error(`[DEBUG] Repository: stored ${this.documents.size} documents in Map`);
 
       // BM25 인덱스 구축 (무거운 작업)
-      console.error(`[DEBUG] Building BM25 indexes...`);
       await this.buildBM25Indexes(documents);
       
       this.initialized = true;
-      console.error(`[DEBUG] Repository initialization completed (${this.instanceId})`);
     } catch (error) {
       console.error(`[DEBUG] Repository initialization failed: ${error}`);
       throw error;
@@ -259,6 +250,134 @@ export class DocumentRepository {
 * 관련도 점수: ${score.toFixed(2)}
 
 ${content}`;
+  }
+
+  /**
+   * 동적으로 문서 추가 (단일 문서)
+   */
+  async addDocument(document: KnowledgeDocument): Promise<void> {
+    this.ensureInitialized();
+    
+    // 기존 문서 ID 중복 체크
+    if (this.documents.has(document.id)) {
+      console.error(`[DEBUG] Replacing existing document with ID: ${document.id}`);
+    }
+    
+    this.documents.set(document.id, document);
+    console.error(`[DEBUG] Added document to repository: ID=${document.id}, domain=${document.domainName}`);
+    
+    // 증분 인덱스 업데이트는 별도 메서드에서 처리
+  }
+
+  /**
+   * 동적으로 문서 제거
+   */
+  async removeDocument(documentId: number): Promise<boolean> {
+    this.ensureInitialized();
+    
+    const removed = this.documents.delete(documentId);
+    if (removed) {
+      console.error(`[DEBUG] Removed document from repository: ID=${documentId}`);
+      // 인덱스 재구축 필요 (성능상 전체 재구축)
+      await this.rebuildIndexes();
+    }
+    
+    return removed;
+  }
+
+  /**
+   * 증분 인덱스 업데이트 (새로 추가된 문서들에 대해)
+   */
+  async updateIndexes(newDocuments: KnowledgeDocument[]): Promise<void> {
+    this.ensureInitialized();
+    
+    console.error(`[DEBUG] Updating indexes for ${newDocuments.length} new documents`);
+    
+    // 새 문서의 청크들 수집
+    const newChunks: DocumentChunk[] = [];
+    newDocuments.forEach(doc => {
+      newChunks.push(...doc.getChunks());
+    });
+
+    // 도메인별로 새 청크들 분류
+    const newDomainChunks = new Map<string, DocumentChunk[]>();
+    newDocuments.forEach(doc => {
+      const domain = doc.domainName || 'general';
+      if (!newDomainChunks.has(domain)) {
+        newDomainChunks.set(domain, []);
+      }
+      newDomainChunks.get(domain)!.push(...doc.getChunks());
+    });
+
+    // 기존 인덱스에 증분 업데이트
+    for (const [domain, chunks] of newDomainChunks.entries()) {
+      if (this.domainCalculators.has(domain)) {
+        // 기존 도메인: 기존 청크와 병합하여 새 계산기 생성
+        const existingChunks = this.getExistingChunksForDomain(domain);
+        const allChunks = [...existingChunks, ...chunks];
+        
+        this.domainCalculators.set(domain, new BM25Calculator(allChunks));
+        console.error(`[DEBUG] Updated BM25Calculator for domain: ${domain} (${allChunks.length} total chunks)`);
+      } else {
+        // 새 도메인: 새 계산기 생성
+        this.domainCalculators.set(domain, new BM25Calculator(chunks));
+        console.error(`[DEBUG] Created new BM25Calculator for domain: ${domain} (${chunks.length} chunks)`);
+      }
+    }
+
+    // 전역 계산기 업데이트
+    const allChunks: DocumentChunk[] = [];
+    this.documents.forEach(doc => {
+      allChunks.push(...doc.getChunks());
+    });
+    
+    if (allChunks.length > 0) {
+      this.globalCalculator = new BM25Calculator(allChunks);
+      console.error(`[DEBUG] Updated global BM25Calculator (${allChunks.length} total chunks)`);
+    }
+  }
+
+  /**
+   * 인덱스 전체 재구축 (문서 삭제 후 등에 사용)
+   */
+  async rebuildIndexes(): Promise<void> {
+    this.ensureInitialized();
+    
+    console.error('[DEBUG] Rebuilding all BM25 indexes...');
+    
+    const allDocuments = Array.from(this.documents.values());
+    await this.buildBM25Indexes(allDocuments);
+    
+    console.error('[DEBUG] Index rebuild completed');
+  }
+
+  /**
+   * 특정 도메인의 기존 청크들 조회 (증분 업데이트용)
+   */
+  private getExistingChunksForDomain(domain: string): DocumentChunk[] {
+    const chunks: DocumentChunk[] = [];
+    
+    this.documents.forEach(doc => {
+      if ((doc.domainName || 'general') === domain) {
+        chunks.push(...doc.getChunks());
+      }
+    });
+    
+    return chunks;
+  }
+
+  /**
+   * Repository 상태 조회 (디버깅용)
+   */
+  getRepositoryStatus() {
+    return {
+      instanceId: this.instanceId,
+      initialized: this.initialized,
+      initializing: this.initializing,
+      documentCount: this.documents.size,
+      domainCalculators: Array.from(this.domainCalculators.keys()),
+      hasGlobalCalculator: !!this.globalCalculator
+    };
   }
 
   /**

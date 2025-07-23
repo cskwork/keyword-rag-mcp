@@ -8,20 +8,26 @@ import {
   Tool,
   TextContent
 } from '@modelcontextprotocol/sdk/types.js';
-import { loadConfig } from './config/config.js';
-import { DocumentLoader } from './services/DocumentLoader.js';
+import { loadConfig, type Config } from './config/config.js';
+import { DocumentLoader, type LoadingResult } from './services/DocumentLoader.js';
 import { DocumentRepository } from './services/DocumentRepository.js';
+import { DomainManager } from './services/DomainManager.js';
+import { LLMClassificationService } from './services/LLMClassificationService.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
 // 전역 변수
 let repository: DocumentRepository | null = null;
-let config: any = null;
+let domainManager: DomainManager | null = null;
+let classificationService: LLMClassificationService | null = null;
+let config: Config | null = null;
 let isInitialized = false;
 let isInitializing = false;
 
-console.error(`[DEBUG] Module loaded at ${new Date().toISOString()}`);
+if (process.env.NODE_ENV === 'development') {
+  console.error(`[DEBUG] Module loaded at ${new Date().toISOString()}`);
+}
 
 // PID 파일 경로
 const PID_FILE = path.join(os.tmpdir(), 'mcp-knowledge-retrieval.pid');
@@ -42,14 +48,18 @@ function checkAndSetProcessLock(): void {
         process.exit(1);
       } catch (e) {
         // 프로세스가 존재하지 않으면 PID 파일 제거
-        console.error(`[DEBUG] Stale PID file found, removing...`);
+        if (process.env.NODE_ENV === 'development') {
+          console.error(`[DEBUG] Stale PID file found, removing...`);
+        }
         fs.unlinkSync(PID_FILE);
       }
     }
     
     // 현재 프로세스 PID 저장
     fs.writeFileSync(PID_FILE, process.pid.toString());
-    console.error(`[DEBUG] Process lock acquired, PID: ${process.pid}`);
+    if (process.env.NODE_ENV === 'development') {
+      console.error(`[DEBUG] Process lock acquired, PID: ${process.pid}`);
+    }
     
     // 프로세스 종료 시 PID 파일 정리
     process.on('exit', () => {
@@ -63,12 +73,16 @@ function checkAndSetProcessLock(): void {
     });
     
     process.on('SIGINT', () => {
-      console.error(`[DEBUG] Received SIGINT, cleaning up...`);
+      if (process.env.NODE_ENV === 'development') {
+        console.error(`[DEBUG] Received SIGINT, cleaning up...`);
+      }
       process.exit(0);
     });
     
     process.on('SIGTERM', () => {
-      console.error(`[DEBUG] Received SIGTERM, cleaning up...`);
+      if (process.env.NODE_ENV === 'development') {
+        console.error(`[DEBUG] Received SIGTERM, cleaning up...`);
+      }
       process.exit(0);
     });
     
@@ -79,10 +93,12 @@ function checkAndSetProcessLock(): void {
 }
 
 /**
- * MCP 서버 초기화
+ * MCP 서버 초기화 (새로운 아키텍처)
  */
 async function initializeServer() {
-  console.error(`[DEBUG] initializeServer() started, isInitialized=${isInitialized}, isInitializing=${isInitializing}`);
+  if (process.env.NODE_ENV === 'development') {
+    console.error(`[DEBUG] initializeServer() started, isInitialized=${isInitialized}, isInitializing=${isInitializing}`);
+  }
   
   if (isInitialized && repository?.isInitialized()) {
     console.error(`[DEBUG] Already initialized, skipping. Repository has ${repository.getStatistics().totalDocuments} documents`);
@@ -101,43 +117,62 @@ async function initializeServer() {
   try {
     isInitializing = true;
     
-    // 설정 로드
-    console.error(`[DEBUG] Loading config...`);
-    config = await loadConfig();
-    console.error(`[DEBUG] Config loaded`);
-    console.error(`[DEBUG] config.documentSource.basePath=${config.documentSource.basePath}`);
-    console.error(`[DEBUG] config.documentSource.domains length=${config.documentSource.domains.length}`);
-    config.documentSource.domains.forEach((d: {name: string; path: string; category?: string})=>
-      console.error(`[DEBUG] domain-> name:${d.name}, path:${d.path}`)
+    // 1. 설정 로드 (간소화된 .env 기반)
+    console.error(`[DEBUG] Loading config from environment...`);
+    config = loadConfig();
+    console.error(`[DEBUG] Config loaded: basePath=${config.documentSource.basePath}`);
+    console.error(`[DEBUG] Classification enabled: ${config.classification.enabled}`);
+
+    // 2. 도메인 매니저 초기화
+    console.error(`[DEBUG] Initializing DomainManager...`);
+    domainManager = new DomainManager();
+    await domainManager.initialize();
+    
+    const domainStats = domainManager.getStatistics();
+    console.error(`[DEBUG] DomainManager initialized: ${domainStats.totalDomains} domains, ${domainStats.totalMappings} mappings`);
+
+    // 3. LLM 분류 서비스 초기화
+    console.error(`[DEBUG] Initializing LLMClassificationService...`);
+    classificationService = new LLMClassificationService(domainManager);
+
+    // 4. 새로운 DocumentLoader로 문서 로드 및 자동 분류
+    console.error(`[DEBUG] Creating DocumentLoader with auto-classification...`);
+    const loader = new DocumentLoader(
+      config.documentSource,
+      domainManager,
+      classificationService,
+      config.classification.autoClassifyNewDocuments
     );
+    
+    console.error(`[DEBUG] Loading and classifying all documents...`);
+    const loadingResult: LoadingResult = await loader.loadAllDocuments();
+    
+    console.error(`[DEBUG] Document loading completed:`);
+    console.error(`[DEBUG] - Total documents: ${loadingResult.documents.length}`);
+    console.error(`[DEBUG] - New domains created: ${loadingResult.newDomains.length}`);
+    console.error(`[DEBUG] - Classification stats:`, loadingResult.classificationStats);
 
-    // 문서 로드
-    console.error(`[DEBUG] Creating DocumentLoader...`);
-    const loader = new DocumentLoader(config.documentSource);
-    console.error(`[DEBUG] Loading documents...`);
-    const documents = await loader.loadAllDocuments();
-    console.error(`[DEBUG] Documents loaded: ${documents.length} documents`);
-
-    // 저장소 생성 및 초기화 (기존 repository가 있으면 재사용하지 않고 새로 생성)
+    // 5. DocumentRepository 초기화
     console.error(`[DEBUG] Creating and initializing DocumentRepository...`);
     if (!repository) {
       repository = new DocumentRepository();
     }
     
-    // repository가 이미 초기화되어 있다면 재초기화하지 않음
     if (!repository.isInitialized()) {
-      await repository.initialize(documents); // 비동기 초기화 대기
+      await repository.initialize(loadingResult.documents);
     } else {
       console.error(`[DEBUG] Repository already initialized, skipping re-initialization`);
     }
     
-    const stats = repository.getStatistics();
-    console.error(`[DEBUG] Repository fully initialized`);
-    console.error(`[DEBUG] Repository instance: ${repository ? 'EXISTS' : 'NULL'}`);
-    console.error(`[DEBUG] Repository stats: ${JSON.stringify(stats)}`);
+    const repoStats = repository.getStatistics();
+    console.error(`[DEBUG] Repository fully initialized:`);
+    console.error(`[DEBUG] - Total documents: ${repoStats.totalDocuments}`);
+    console.error(`[DEBUG] - Total chunks: ${repoStats.totalChunks}`);
+    console.error(`[DEBUG] - Total words: ${repoStats.totalWords}`);
+    console.error(`[DEBUG] - Domains: ${repoStats.domains.length}`);
     
     isInitialized = true;
-    console.error(`[DEBUG] initializeServer() completed successfully, isInitialized=${isInitialized}`);
+    console.error(`[DEBUG] initializeServer() completed successfully`);
   } catch (error) {
     console.error(`[DEBUG] Error in initializeServer(): ${error}`);
     isInitialized = false;
@@ -168,8 +203,8 @@ async function ensureServerReady() {
   }
   
   // 초기화 후 상태 검증
-  if (!repository || !repository.isInitialized()) {
-    throw new Error('Repository initialization failed or corrupted');
+  if (!repository || !repository.isInitialized() || !domainManager || !classificationService || !config) {
+    throw new Error('Server initialization failed or corrupted');
   }
 }
 
@@ -191,8 +226,8 @@ async function main() {
   // MCP 서버 생성
   const server = new Server(
     {
-      name: config.serverName,
-      version: config.serverVersion,
+      name: config!.serverName,
+      version: config!.serverVersion,
     },
     {
       capabilities: {
@@ -203,7 +238,6 @@ async function main() {
 
   // 도구 목록 조회 핸들러
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    // This is a dummy handler, tools are managed by the client
     if (!config) {
       try {
         await ensureServerReady();
@@ -211,77 +245,92 @@ async function main() {
         console.error("Failed to initialize server for ListTools", e);
       }
     }
+    
     const tools: Tool[] = [
-        {
-          name: 'search-documents',
-          description: 'Search documents using BM25 algorithm. Takes keyword arrays and returns relevant document chunks.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              keywords: {
-                type: 'array',
-                items: { type: 'string' },
-                description: 'Array of keywords to search for (e.g., ["payment", "API", "authentication"])'
-              },
-              domain: {
-                type: 'string',
-                description: 'Domain to search in (optional, e.g., "company", "customer")'
-              },
-              topN: {
-                type: 'number',
-                description: 'Maximum number of results to return (default: 10)',
-                default: 10
-              }
+      {
+        name: 'search-documents',
+        description: 'Search documents using BM25 algorithm with auto-classified domains. Takes keyword arrays and returns relevant document chunks.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            keywords: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of keywords to search for (e.g., ["payment", "API", "authentication"])'
             },
-            required: ['keywords']
-          }
-        },
-        {
-          name: 'get-document-by-id',
-          description: 'Retrieve full document by ID.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              id: {
-                type: 'number',
-                description: 'Document ID to retrieve'
-              }
+            domain: {
+              type: 'string',
+              description: 'Domain to search in (optional). Use list-domains to see available domains.'
             },
-            required: ['id']
-          }
-        },
-        {
-          name: 'list-domains',
-          description: 'List all available domains and their document counts.',
-          inputSchema: {
-            type: 'object',
-            properties: {}
-          }
-        },
-        {
-          name: 'get-chunk-with-context',
-          description: 'Get specific chunk with surrounding context.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              documentId: {
-                type: 'number',
-                description: 'Document ID'
-              },
-              chunkId: {
-                type: 'number',
-                description: 'Chunk ID'
-              },
-              windowSize: {
-                type: 'number',
-                description: 'Context window size (default: 1)',
-                default: 1
-              }
-            },
-            required: ['documentId', 'chunkId']
-          }
+            topN: {
+              type: 'number',
+              description: 'Maximum number of results to return (default: 10)',
+              default: 10
+            }
+          },
+          required: ['keywords']
         }
-      ];
+      },
+      {
+        name: 'get-document-by-id',
+        description: 'Retrieve full document by ID.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'number',
+              description: 'Document ID to retrieve'
+            }
+          },
+          required: ['id']
+        }
+      },
+      {
+        name: 'list-domains',
+        description: 'List all auto-generated domains and their document counts. Domains are created dynamically based on document content.',
+        inputSchema: {
+          type: 'object',
+          properties: {}
+        }
+      },
+      {
+        name: 'get-domain-info',
+        description: 'Get detailed information about a specific domain.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            domainName: {
+              type: 'string',
+              description: 'Name of the domain to get information about'
+            }
+          },
+          required: ['domainName']
+        }
+      },
+      {
+        name: 'get-chunk-with-context',
+        description: 'Get specific chunk with surrounding context.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            documentId: {
+              type: 'number',
+              description: 'Document ID'
+            },
+            chunkId: {
+              type: 'number',
+              description: 'Chunk ID'
+            },
+            windowSize: {
+              type: 'number',
+              description: 'Context window size (default: 1)',
+              default: 1
+            }
+          },
+          required: ['documentId', 'chunkId']
+        }
+      }
+    ];
     
     return { tools };
   });
@@ -307,9 +356,9 @@ async function main() {
       console.error(`[DEBUG] Repository documents count: ${repository.getStatistics().totalDocuments}`);
     }
 
-    // 이 시점에서 repository는 null이 아님을 보장
-    if (!repository || !repository.isInitialized()) {
-      throw new Error('Repository is not properly initialized');
+    // 이 시점에서 모든 서비스가 null이 아님을 보장
+    if (!repository || !repository.isInitialized() || !domainManager || !config) {
+      throw new Error('Services are not properly initialized');
     }
 
     switch (name) {
@@ -358,6 +407,7 @@ async function main() {
       case 'list-domains': {
         console.error(`[DEBUG] list-domains called`);
         const domains = repository.listDomains();
+        const domainDetails = domainManager.getAllDomains();
         console.error(`[DEBUG] domains found: ${JSON.stringify(domains)}`);
         
         if (domains.length === 0) {
@@ -368,13 +418,64 @@ async function main() {
           return { content };
         }
 
-        const domainList = domains
-          .map(d => `- ${d.name}: ${d.documentCount} documents`)
-          .join('\n');
+        let domainList = "## Auto-Generated Domains\n\n";
+        
+        for (const domain of domains) {
+          const details = domainDetails.find(d => d.name === domain.name);
+          if (details) {
+            domainList += `### ${details.displayName} (${domain.name})\n`;
+            domainList += `- **Documents**: ${domain.documentCount}\n`;
+            domainList += `- **Description**: ${details.description}\n`;
+            domainList += `- **Keywords**: ${details.keywords.join(', ')}\n`;
+            domainList += `- **Created**: ${details.createdAt.toISOString().split('T')[0]}\n\n`;
+          } else {
+            domainList += `- ${domain.name}: ${domain.documentCount} documents\n`;
+          }
+        }
 
         const content: TextContent[] = [{
           type: 'text',
-          text: `## Available Domains\n\n${domainList}`
+          text: domainList
+        }];
+        
+        return { content };
+      }
+
+      case 'get-domain-info': {
+        const { domainName } = args as { domainName: string };
+        const domainInfo = domainManager.getDomain(domainName);
+        
+        if (!domainInfo) {
+          const content: TextContent[] = [{
+            type: 'text',
+            text: `Domain '${domainName}' not found.`
+          }];
+          return { content };
+        }
+
+        const mappings = domainManager.getDomainMappings(domainName);
+        
+        let info = `# Domain: ${domainInfo.displayName}\n\n`;
+        info += `**Name**: ${domainInfo.name}\n`;
+        info += `**Description**: ${domainInfo.description}\n`;
+        info += `**Document Count**: ${domainInfo.documentCount}\n`;
+        info += `**Keywords**: ${domainInfo.keywords.join(', ')}\n`;
+        info += `**Created**: ${domainInfo.createdAt.toISOString()}\n`;
+        info += `**Last Updated**: ${domainInfo.lastUpdated.toISOString()}\n\n`;
+        
+        if (mappings.length > 0) {
+          info += `## Document Mappings\n\n`;
+          mappings.forEach((mapping, index) => {
+            const fileName = mapping.filePath.split(/[/\\]/).pop() || mapping.filePath;
+            info += `${index + 1}. **${fileName}** (confidence: ${mapping.confidence.toFixed(2)})\n`;
+            info += `   - Path: ${mapping.filePath}\n`;
+            info += `   - Assigned: ${mapping.assignedAt.toISOString()}\n\n`;
+          });
+        }
+
+        const content: TextContent[] = [{
+          type: 'text',
+          text: info
         }];
         
         return { content };
@@ -424,7 +525,7 @@ async function main() {
   // STDIO 전송 설정
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  // MCP server started successfully (silent for protocol)
+  console.error(`[DEBUG] MCP server started successfully with auto-classification enabled`);
 }
 
 // 에러 핸들링

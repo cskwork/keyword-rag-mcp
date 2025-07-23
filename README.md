@@ -1,7 +1,14 @@
 # MCP Knowledge Retrieval Server
 
-BM25 기반 문서 검색 및 검색을 위한 MCP(Model Context Protocol) 서버입니다.
-- 참고한 토스결제연동 MCP 기술블로그. https://toss.tech/article/tosspayments-mcp
+🤖 **LLM 기반 자동 분류**와 **동적 도메인 생성**을 지원하는 차세대 MCP(Model Context Protocol) 지식 검색 서버입니다.
+
+## ✨ 핵심 특징
+
+- 🤖 **자동 문서 분류**: LLM이 문서 내용을 분석하여 적절한 도메인을 자동 생성
+- 📂 **동적 도메인 관리**: 문서 내용에 따라 도메인이 자동으로 생성되고 관리됨
+- 🔒 **영구 도메인 이름**: 한 번 생성된 도메인 이름은 세션 간에 일관성 유지
+- ⚙️ **간소화된 설정**: 복잡한 JSON 설정 파일 제거, 순수 `.env` 기반 설정
+- 🔍 **지능형 검색**: 자동 생성된 도메인 내에서 BM25 기반 검색 지원
 
 ## 🚀 즉시 시작하기
 
@@ -18,7 +25,7 @@ run.bat
 - ✅ Node.js 버전 확인
 - ✅ 의존성 설치 (`npm install`)
 - ✅ 프로젝트 빌드 (`npm run build`)
-- ✅ 설정 파일 생성 (`config.json`)
+- ✅ 환경 설정 파일 생성 (`.env`)
 - ✅ 예시 문서 생성 (`docs/` 폴더)
 - ✅ Claude Desktop 설정 가이드 출력
 - ✅ MCP 서버 실행
@@ -26,7 +33,7 @@ run.bat
 ### 수동 설치
 ```bash
 # 단계별 설치
-npm install && npm run build && cp config.example.json config.json
+npm install && npm run build && cp .env.example .env
 
 # 서버 실행
 npm start
@@ -37,82 +44,50 @@ npm start
 npm run dev
 ```
 
-## 📋 기본 설정
+## 📋 새로운 설정 방식
 
-### config.json (자동 생성됨)
-```json
-{
-  "serverName": "knowledge-retrieval",  
-  "serverVersion": "1.0.0",
-  "documentSource": {
-    "type": "local",
-    "basePath": "./docs",
-    "domains": [
-      {
-        "name": "company",
-        "path": "company",
-        "category": "회사정보"
-      },
-      {
-        "name": "customer", 
-        "path": "customer",
-        "category": "고객서비스"
-      },
-      {
-        "name": "product",
-        "path": "product", 
-        "category": "제품정보"
-      },
-      {
-        "name": "technical",
-        "path": "technical",
-        "category": "기술문서"
-      }
-    ]
-  },
-  "bm25": {
-    "k1": 1.2,
-    "b": 0.75
-  },
-  "chunk": {
-    "minWords": 30,
-    "contextWindowSize": 1
-  },
-  "logLevel": "info"
-}
+### .env 파일 (간소화됨!)
+```bash
+# MCP Server Configuration
+MCP_SERVER_NAME=knowledge-retrieval
+MCP_SERVER_VERSION=1.0.0
+
+# Document Source Configuration
+DOCS_SOURCE_TYPE=local
+DOCS_BASE_PATH=./docs
+
+# BM25 Search Algorithm Parameters
+BM25_K1=1.2
+BM25_B=0.75
+
+# Document Chunking Configuration
+CHUNK_MIN_WORDS=30
+CONTEXT_WINDOW_SIZE=1
+
+# LLM Classification Settings
+CLASSIFICATION_ENABLED=true
+AUTO_CLASSIFY_NEW_DOCS=true
+
+# Logging Configuration
+LOG_LEVEL=info
 ```
 
-### 주요 설정 항목
-- **documentSource.basePath**: 문서 파일들이 위치한 기본 경로
-- **domains**: 검색할 도메인들의 설정
-- **bm25.k1**: BM25 알고리즘의 term frequency saturation 파라미터 (기본값: 1.2)
-- **bm25.b**: BM25 알고리즘의 field length normalization 파라미터 (기본값: 0.75)
-- **chunk.minWords**: 청크의 최소 단어 수 (기본값: 30)
+### 주요 변경사항
+- ❌ **config.json 제거**: 복잡한 도메인 설정 불필요
+- ✅ **자동 도메인 생성**: 문서 내용 기반으로 도메인 자동 생성
+- ✅ **환경 변수 기반**: 모든 설정이 `.env` 파일로 단순화
+- ✅ **도메인 지속성**: `.domain-data.json`에서 자동 관리
 
-## 🔧 Claude Desktop 연동
+## 🔧 MCP 클라이언트 연동 (Claude Desktop 등)
 
-### 설정 파일 위치
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+MCP 클라이언트가 서버를 올바르게 실행하려면, `npm start` 명령을 사용하고 프로젝트의 루트 디렉토리를 작업 디렉토리(`cwd`)로 설정하는 것이 가장 안정적이고 권장되는 방법입니다.
 
-### 설정 내용 (절대 경로)
-```json
-{
-  "mcpServers": {
-    "knowledge-retrieval": {
-      "command": "node",
-      "args": ["<프로젝트_경로>/dist/index.js"],
-      "env": {
-        "NODE_ENV": "production"
-      }
-    }
-  }
-}
-```
+### 설정 예시
+아래 예시를 참고하여 사용 중인 MCP 클라이언트의 설정 파일에 추가하세요.
 
-**중요**: `<프로젝트_경로>`를 실제 프로젝트 폴더의 절대 경로로 바꾸세요!
+- **Claude Desktop (macOS)**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Claude Desktop (Windows)**: `%APPDATA%/Claude/claude_desktop_config.json`
 
-### 권장 설정 (작업 디렉토리 지정)
 ```json
 {
   "mcpServers": {
@@ -124,6 +99,10 @@ npm run dev
   }
 }
 ```
+
+**⚠️ 중요**:
+- `knowledge-retrieval` 값은 `.env` 파일의 `MCP_SERVER_NAME`과 반드시 일치해야 합니다.
+- `<프로젝트_경로>`는 이 프로젝트 폴더의 **절대 경로**로 반드시 변경해야 합니다. (예: `/Users/test/keyword-rag-mcp`)
 
 ## 📁 문서 구조
 

@@ -3,72 +3,94 @@ import * as fsSync from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { KnowledgeDocument, createRemoteMarkdownDocument } from '../models/Document.js';
+import { DomainManager } from './DomainManager.js';
+import { LLMClassificationService } from './LLMClassificationService.js';
 
+/**
+ * 간소화된 문서 소스 인터페이스
+ */
 export interface DocumentSource {
   type: 'local' | 'remote';
   basePath: string;
-  domains: Array<{
-    name: string;
-    path: string;
-    category?: string;
-  }>;
 }
 
 /**
- * 문서 로더
- * 로컬 파일 시스템 또는 원격 URL에서 마크다운 문서를 로드
+ * 문서 로딩 결과
+ */
+export interface LoadingResult {
+  documents: KnowledgeDocument[];
+  newDomains: string[];
+  classificationStats: {
+    total: number;
+    newlyClassified: number;
+    existingMappings: number;
+    failed: number;
+  };
+}
+
+/**
+ * 새로운 문서 로더
+ * docs/ 폴더를 직접 스캔하고 LLM 기반 자동 분류를 수행
  */
 export class DocumentLoader {
   private documents: KnowledgeDocument[] = [];
   private documentIdCounter = 0;
 
-  constructor(private readonly source: DocumentSource) {}
+  constructor(
+    private readonly source: DocumentSource,
+    private readonly domainManager: DomainManager,
+    private readonly classificationService: LLMClassificationService,
+    private readonly autoClassify: boolean = true
+  ) {}
 
   /**
-   * 모든 문서 로드
+   * 모든 문서 로드 및 자동 분류
    */
-  async loadAllDocuments(): Promise<KnowledgeDocument[]> {
+  async loadAllDocuments(): Promise<LoadingResult> {
     this.documents = [];
     this.documentIdCounter = 0;
 
-    console.error(`[DEBUG] DocumentLoader.loadAllDocuments start. Domains to process: ${this.source.domains.length}`);
-    for (const domain of this.source.domains) {
-      console.error(`[DEBUG] Processing domain: ${domain.name}, path: ${domain.path}`);
-      await this.loadDomainDocuments(domain);
-      console.error(`[DEBUG] Completed domain: ${domain.name}. Total documents so far: ${this.documents.length}`);
-    }
+    console.error(`[DEBUG] DocumentLoader: Starting auto-classification scan of ${this.source.basePath}`);
 
-    console.error(`[DEBUG] DocumentLoader.loadAllDocuments completed. Total documents loaded: ${this.documents.length}`);
-    return this.documents;
-  }
-
-  /**
-   * 특정 도메인의 문서 로드
-   */
-  private async loadDomainDocuments(domain: {
-    name: string;
-    path: string;
-    category?: string;
-  }): Promise<void> {
-    const fullPath = path.join(this.source.basePath, domain.path);
-    console.error(`[DEBUG] loadDomainDocuments for ${domain.name}. fullPath=${fullPath}. exists=${fsSync.existsSync(fullPath)}`);
+    const result: LoadingResult = {
+      documents: [],
+      newDomains: [],
+      classificationStats: {
+        total: 0,
+        newlyClassified: 0,
+        existingMappings: 0,
+        failed: 0
+      }
+    };
 
     if (this.source.type === 'local') {
-      await this.loadLocalDocuments(fullPath, domain.name, domain.category);
+      await this.loadLocalDocumentsWithClassification(this.source.basePath, result);
     } else {
-      await this.loadRemoteDocuments(fullPath, domain.name, domain.category);
+      await this.loadRemoteDocumentsWithClassification(this.source.basePath, result);
     }
+
+    result.documents = this.documents;
+
+    console.error(`[DEBUG] DocumentLoader: Completed loading ${result.documents.length} documents`);
+    console.error(`[DEBUG] Classification stats:`, result.classificationStats);
+    console.error(`[DEBUG] New domains created:`, result.newDomains);
+
+    return result;
   }
 
   /**
-   * 로컬 파일 시스템에서 문서 로드
+   * 로컬 문서 로드 및 분류
    */
-  private async loadLocalDocuments(
+  private async loadLocalDocumentsWithClassification(
     dirPath: string,
-    domainName: string,
-    category?: string
+    result: LoadingResult
   ): Promise<void> {
     try {
+      if (!fsSync.existsSync(dirPath)) {
+        console.error(`[DEBUG] Directory does not exist: ${dirPath}`);
+        return;
+      }
+
       const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
       for (const entry of entries) {
@@ -76,34 +98,23 @@ export class DocumentLoader {
 
         if (entry.isDirectory()) {
           // 하위 디렉토리 재귀적 탐색
-          await this.loadLocalDocuments(fullPath, domainName, category);
+          await this.loadLocalDocumentsWithClassification(fullPath, result);
         } else if (entry.isFile() && this.isMarkdownFile(entry.name)) {
-          // 마크다운 파일 로드
-          const content = await fs.readFile(fullPath, 'utf-8');
-          const document = this.createDocument(
-            content,
-            fullPath,
-            domainName,
-            category
-          );
-          this.documents.push(document);
+          // 마크다운 파일 처리
+          await this.processMarkdownFile(fullPath, result);
         }
       }
     } catch (error) {
-      console.error(`[DEBUG] Failed to load local documents from ${dirPath}:`, (error as Error).message);
-      console.error(`[DEBUG] Working directory: ${process.cwd()}`);
-      console.error(`[DEBUG] Directory exists: ${fsSync.existsSync(dirPath)}`);
-      // Failed to load documents (silent for MCP protocol)
+      console.error(`[DEBUG] Failed to load documents from ${dirPath}:`, (error as Error).message);
     }
   }
 
   /**
-   * 원격 URL에서 문서 로드
+   * 원격 문서 로드 및 분류
    */
-  private async loadRemoteDocuments(
+  private async loadRemoteDocumentsWithClassification(
     baseUrl: string,
-    domainName: string,
-    category?: string
+    result: LoadingResult
   ): Promise<void> {
     try {
       // llms.txt 파일 로드 시도
@@ -114,26 +125,108 @@ export class DocumentLoader {
       // llms.txt 파싱하여 문서 URL 추출
       const documentUrls = this.parseLlmsTxt(llmsContent, baseUrl);
 
-      // 각 문서 로드
+      // 각 문서 처리
       for (const docUrl of documentUrls) {
         try {
           const docResponse = await axios.get(docUrl);
           const content = docResponse.data;
-          const document = this.createDocument(
-            content,
-            docUrl,
-            domainName,
-            category
-          );
-          this.documents.push(document);
+          await this.processDocumentContent(content, docUrl, result);
         } catch (error) {
           console.error(`[DEBUG] Failed to load remote document ${docUrl}:`, (error as Error).message);
-          // Failed to load document (silent for MCP protocol)
+          result.classificationStats.failed++;
         }
       }
     } catch (error) {
       console.error(`[DEBUG] Failed to load remote documents from ${baseUrl}:`, (error as Error).message);
-      // Failed to load documents (silent for MCP protocol)
+    }
+  }
+
+  /**
+   * 마크다운 파일 처리
+   */
+  private async processMarkdownFile(filePath: string, result: LoadingResult): Promise<void> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      await this.processDocumentContent(content, filePath, result);
+    } catch (error) {
+      console.error(`[DEBUG] Failed to process file ${filePath}:`, (error as Error).message);
+      result.classificationStats.failed++;
+    }
+  }
+
+  /**
+   * 문서 내용 처리 및 분류
+   */
+  private async processDocumentContent(
+    content: string,
+    filePath: string,
+    result: LoadingResult
+  ): Promise<void> {
+    result.classificationStats.total++;
+
+    try {
+      let domainName: string;
+      
+      // 기존 매핑 확인
+      const existingMapping = this.domainManager.getDocumentDomain(filePath);
+      
+      if (existingMapping) {
+        // 기존 매핑이 있으면 사용
+        domainName = existingMapping.domainName;
+        result.classificationStats.existingMappings++;
+        console.error(`[DEBUG] Using existing mapping: ${filePath} -> ${domainName}`);
+      } else if (this.autoClassify) {
+        // 자동 분류 수행
+        const classification = await this.classificationService.classifyDocument(content, filePath);
+        domainName = classification.domainName;
+        
+        // 새 도메인이 생성되었는지 확인
+        if (!this.domainManager.hasDomain(domainName)) {
+          await this.domainManager.createDomain(
+            domainName,
+            classification.displayName,
+            classification.description,
+            classification.keywords
+          );
+          result.newDomains.push(domainName);
+          console.error(`[DEBUG] Created new domain: ${domainName}`);
+        }
+
+        // 문서-도메인 매핑 저장
+        await this.domainManager.assignDocumentToDomain(
+          filePath,
+          domainName,
+          classification.confidence
+        );
+        
+        result.classificationStats.newlyClassified++;
+        console.error(`[DEBUG] Classified document: ${filePath} -> ${domainName} (confidence: ${classification.confidence})`);
+      } else {
+        // 자동 분류가 비활성화된 경우 기본 도메인 사용
+        domainName = 'general';
+        
+        // 기본 도메인이 없으면 생성
+        if (!this.domainManager.hasDomain('general')) {
+          await this.domainManager.createDomain(
+            'general',
+            '일반 문서',
+            '분류되지 않은 일반적인 문서들',
+            ['general', 'misc', 'other']
+          );
+          result.newDomains.push('general');
+        }
+
+        await this.domainManager.assignDocumentToDomain(filePath, 'general', 0.5);
+        result.classificationStats.newlyClassified++;
+      }
+
+      // 문서 객체 생성
+      const document = this.createDocument(content, filePath, domainName);
+      this.documents.push(document);
+
+    } catch (error) {
+      console.error(`[DEBUG] Failed to classify document ${filePath}:`, (error as Error).message);
+      result.classificationStats.failed++;
     }
   }
 
@@ -172,8 +265,7 @@ export class DocumentLoader {
   private createDocument(
     content: string,
     link: string,
-    domainName: string,
-    category?: string
+    domainName: string
   ): KnowledgeDocument {
     const remoteDoc = createRemoteMarkdownDocument(
       `doc-${this.documentIdCounter}`,
@@ -187,9 +279,63 @@ export class DocumentLoader {
       domainName
     );
 
-    console.error(`[DEBUG] Created document: ID=${document.id}, title=${document.title}, domainName=${document.domainName}`);
+    console.error(`[DEBUG] Created document: ID=${document.id}, title=${document.title}, domain=${document.domainName}`);
 
     return document;
+  }
+
+  /**
+   * 단일 문서 추가 및 분류
+   */
+  async addDocument(filePath: string): Promise<KnowledgeDocument | null> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      
+      // 분류 수행
+      let domainName: string;
+      const existingMapping = this.domainManager.getDocumentDomain(filePath);
+      
+      if (existingMapping) {
+        domainName = existingMapping.domainName;
+      } else if (this.autoClassify) {
+        const classification = await this.classificationService.classifyDocument(content, filePath);
+        domainName = classification.domainName;
+        
+        if (!this.domainManager.hasDomain(domainName)) {
+          await this.domainManager.createDomain(
+            domainName,
+            classification.displayName,
+            classification.description,
+            classification.keywords
+          );
+        }
+
+        await this.domainManager.assignDocumentToDomain(
+          filePath,
+          domainName,
+          classification.confidence
+        );
+      } else {
+        domainName = 'general';
+        if (!this.domainManager.hasDomain('general')) {
+          await this.domainManager.createDomain(
+            'general',
+            '일반 문서',
+            '분류되지 않은 일반적인 문서들',
+            ['general']
+          );
+        }
+        await this.domainManager.assignDocumentToDomain(filePath, 'general', 0.5);
+      }
+
+      const document = this.createDocument(content, filePath, domainName);
+      this.documents.push(document);
+      
+      return document;
+    } catch (error) {
+      console.error(`[DEBUG] Failed to add document ${filePath}:`, (error as Error).message);
+      return null;
+    }
   }
 
   /**
