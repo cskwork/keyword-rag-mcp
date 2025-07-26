@@ -3,7 +3,7 @@
   "serverVersion": "1.0.0",
   "documentSource": {
     "type": "local",
-    "basePath": "./docs",
+    "basePath": "./domain",
     "domains": [
       {
         "name": "company",
@@ -12,7 +12,7 @@
       },
       {
         "name": "customer",
-        "path": "customer", 
+        "path": "customer",
         "category": "고객서비스"
       },
       {
@@ -25,7 +25,10 @@
         "path": "technical",
         "category": "기술문서"
       }
-    ]
+    ],
+    "autoDiscovery": {
+      "enabled": true
+    }
   },
   "bm25": {
     "k1": 1.2,
@@ -36,4 +39,4 @@
     "contextWindowSize": 1
   },
   "logLevel": "info"
-} 
+}

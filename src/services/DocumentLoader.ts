@@ -32,13 +32,28 @@ export class DocumentLoader {
     this.documentIdCounter = 0;
 
     console.error(`[DEBUG] DocumentLoader.loadAllDocuments start. Domains to process: ${this.source.domains.length}`);
+    console.error(`[DEBUG] Base path: ${this.source.basePath}`);
+    console.error(`[DEBUG] Source type: ${this.source.type}`);
+    
+    // 도메인 설정 정보 출력 (auto-discovery 지원)
+    if (this.source.domains.length > 0) {
+      console.error(`[DEBUG] Domain configuration:`);
+      for (const domain of this.source.domains) {
+        console.error(`[DEBUG]   - ${domain.name}: ${domain.path} (${domain.category || 'No category'})`);
+      }
+    }
+    
     for (const domain of this.source.domains) {
-      console.error(`[DEBUG] Processing domain: ${domain.name}, path: ${domain.path}`);
+      console.error(`[DEBUG] Processing domain: ${domain.name}, path: ${domain.path}, category: ${domain.category || 'N/A'}`);
       await this.loadDomainDocuments(domain);
       console.error(`[DEBUG] Completed domain: ${domain.name}. Total documents so far: ${this.documents.length}`);
     }
 
     console.error(`[DEBUG] DocumentLoader.loadAllDocuments completed. Total documents loaded: ${this.documents.length}`);
+    
+    // 로드된 문서들의 도메인별 통계 출력
+    this.logDomainStatistics();
+    
     return this.documents;
   }
 
@@ -204,5 +219,31 @@ export class DocumentLoader {
    */
   getDocuments(): KnowledgeDocument[] {
     return this.documents;
+  }
+
+  /**
+   * 도메인별 문서 로드 통계 출력
+   */
+  private logDomainStatistics(): void {
+    if (this.documents.length === 0) {
+      console.error(`[DEBUG] No documents loaded`);
+      return;
+    }
+
+    // 도메인별 문서 개수 집계
+    const domainStats = new Map<string, number>();
+    for (const doc of this.documents) {
+      const domainName = doc.domainName || 'unknown';
+      const count = domainStats.get(domainName) || 0;
+      domainStats.set(domainName, count + 1);
+    }
+
+    console.error(`[DEBUG] Document loading statistics:`);
+    console.error(`[DEBUG] Total documents: ${this.documents.length}`);
+    console.error(`[DEBUG] Documents by domain:`);
+    
+    for (const [domain, count] of domainStats.entries()) {
+      console.error(`[DEBUG]   - ${domain}: ${count} documents`);
+    }
   }
 } 
