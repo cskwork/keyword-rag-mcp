@@ -1,5 +1,6 @@
 import { BM25Calculator, escapeRegExp, type SearchResult, type DocumentChunk } from '../utils/bm25.js';
 import { KnowledgeDocument } from '../models/Document.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * 문서 저장소
@@ -8,87 +9,71 @@ import { KnowledgeDocument } from '../models/Document.js';
 export class DocumentRepository {
   private readonly instanceId: string = `repo-${Date.now()}-${Math.random()}`;
   private readonly documents: Map<number, KnowledgeDocument> = new Map();
-  private readonly domainCalculators: Map<string, BM25Calculator> = new Map();
-  private globalCalculator: BM25Calculator | null = null;
+  private bm25Calculator: BM25Calculator | null = null;
+  private domainChunks: Map<string, DocumentChunk[]> = new Map();
   private initialized: boolean = false;
-  private initializing: boolean = false;
 
-  constructor() {
-    console.error(`[DEBUG] Repository constructor (${this.instanceId}): 초기화 대기 상태`);
+  constructor(documents?: KnowledgeDocument[]) {
+    logger.debug(`Repository constructor (${this.instanceId})`);
+    if (documents) {
+      this.initializeSync(documents);
+    }
   }
 
   /**
-   * 비동기로 Repository 초기화
+   * 동기적으로 Repository 초기화
    * @param documents 로드된 문서 배열
    */
-  async initialize(documents: KnowledgeDocument[]): Promise<void> {
+  private initializeSync(documents: KnowledgeDocument[]): void {
     if (this.initialized) {
-      console.error(`[DEBUG] Repository (${this.instanceId}) already initialized`);
+      logger.debug(`Repository (${this.instanceId}) already initialized`);
       return;
     }
 
-    if (this.initializing) {
-      console.error(`[DEBUG] Repository (${this.instanceId}) already initializing, waiting...`);
-      // 초기화 완료까지 대기
-      while (this.initializing && !this.initialized) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      return;
-    }
+    logger.debug(`Repository initialization started (${this.instanceId}): received ${documents.length} documents`);
 
-    try {
-      this.initializing = true;
-      console.error(`[DEBUG] Repository initialization started (${this.instanceId}): received ${documents.length} documents`);
+    // 문서 저장
+    documents.forEach(doc => {
+      logger.debug(`Storing document: ID=${doc.id}, domainName=${doc.domainName}`);
+      this.documents.set(doc.id, doc);
+    });
+    logger.debug(`Repository: stored ${this.documents.size} documents in Map`);
 
-      // 문서 저장
-      documents.forEach(doc => {
-        console.error(`[DEBUG] Storing document: ID=${doc.id}, domainName=${doc.domainName}`);
-        this.documents.set(doc.id, doc);
-      });
-      console.error(`[DEBUG] Repository: stored ${this.documents.size} documents in Map`);
-
-      // BM25 인덱스 구축 (무거운 작업)
-      console.error(`[DEBUG] Building BM25 indexes...`);
-      await this.buildBM25Indexes(documents);
-      
-      this.initialized = true;
-      console.error(`[DEBUG] Repository initialization completed (${this.instanceId})`);
-    } catch (error) {
-      console.error(`[DEBUG] Repository initialization failed: ${error}`);
-      throw error;
-    } finally {
-      this.initializing = false;
-    }
+    // BM25 인덱스 구축
+    logger.debug(`Building BM25 indexes...`);
+    this.buildBM25Indexes(documents);
+    
+    this.initialized = true;
+    logger.debug(`Repository initialization completed (${this.instanceId})`);
   }
 
   /**
-   * BM25 인덱스 구축 (별도 메서드로 분리)
+   * BM25 인덱스 구축
    */
-  private async buildBM25Indexes(documents: KnowledgeDocument[]): Promise<void> {
-    const domainChunks = new Map<string, DocumentChunk[]>();
+  private buildBM25Indexes(documents: KnowledgeDocument[]): void {
     const allChunks: DocumentChunk[] = [];
 
+    // 도메인별 찭크 분류 및 전체 찭크 수집
     documents.forEach(doc => {
       const chunks = doc.getChunks();
       allChunks.push(...chunks);
 
       const domain = doc.domainName || 'general';
-      if (!domainChunks.has(domain)) {
-        domainChunks.set(domain, []);
+      if (!this.domainChunks.has(domain)) {
+        this.domainChunks.set(domain, []);
       }
-      domainChunks.get(domain)!.push(...chunks);
+      this.domainChunks.get(domain)!.push(...chunks);
     });
 
-    // 도메인별 계산기 초기화 (CPU 집약적 작업)
-    domainChunks.forEach((chunks, domain) => {
-      this.domainCalculators.set(domain, new BM25Calculator(chunks));
-      console.error(`[DEBUG] Created BM25Calculator for domain: ${domain} (${chunks.length} chunks)`);
-    });
-
-    // 전역 계산기 초기화
+    // 단일 BM25 계산기 생성 (전체 문서 기반)
     if (allChunks.length > 0) {
-      this.globalCalculator = new BM25Calculator(allChunks);
-      console.error(`[DEBUG] Created global BM25Calculator (${allChunks.length} chunks)`);
+      this.bm25Calculator = new BM25Calculator(allChunks);
+      logger.debug(`Created BM25Calculator (${allChunks.length} chunks)`);
+      
+      // 도메인별 통계 로깅
+      this.domainChunks.forEach((chunks, domain) => {
+        logger.debug(`Domain ${domain}: ${chunks.length} chunks`);
+      });
     }
   }
 
@@ -104,7 +89,7 @@ export class DocumentRepository {
    */
   private ensureInitialized(): void {
     if (!this.initialized) {
-      throw new Error('Repository가 아직 초기화되지 않았습니다. 잠시 후 다시 시도해주세요.');
+      throw new Error('Repository가 초기화되지 않았습니다.');
     }
   }
 
@@ -125,15 +110,7 @@ export class DocumentRepository {
     this.ensureInitialized();
     const { domain, topN = 10, contextWindow = 1 } = options;
 
-    // 검색할 계산기 선택
-    let calculator: BM25Calculator | null;
-    if (domain && this.domainCalculators.has(domain)) {
-      calculator = this.domainCalculators.get(domain)!;
-    } else {
-      calculator = this.globalCalculator;
-    }
-
-    if (!calculator) {
+    if (!this.bm25Calculator) {
       return "검색 가능한 문서가 없습니다.";
     }
 
@@ -148,9 +125,17 @@ export class DocumentRepository {
     }
 
     // BM25 검색 수행
-    const results = calculator.calculate(pattern);
+    let results = this.bm25Calculator.calculate(pattern);
+    
+    // 도메인 필터링 (지정된 경우)
+    if (domain && this.domainChunks.has(domain)) {
+      const domainChunkIds = new Set(
+        this.domainChunks.get(domain)!.map(chunk => chunk.chunkId)
+      );
+      results = results.filter(result => domainChunkIds.has(result.chunkId));
+    }
+    
     const topResults = results.slice(0, topN);
-
     return this.formatSearchResults(topResults, contextWindow);
   }
 
@@ -177,21 +162,21 @@ export class DocumentRepository {
    */
   listDomains(): Array<{ name: string; documentCount: number }> {
     this.ensureInitialized();
-    console.error(`[DEBUG] listDomains called on instance ${this.instanceId}, documents.size=${this.documents.size}`);
+    logger.debug(`listDomains called on instance ${this.instanceId}, documents.size=${this.documents.size}`);
     const domainCounts = new Map<string, number>();
 
     this.documents.forEach(doc => {
       const domain = doc.domainName || 'general';
-      console.error(`[DEBUG] Processing document: ID=${doc.id}, domain=${domain}`);
+      logger.debug(`Processing document: ID=${doc.id}, domain=${domain}`);
       domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
     });
 
-    console.error(`[DEBUG] domainCounts Map: ${JSON.stringify([...domainCounts.entries()])}`);
+    logger.debug(`domainCounts Map: ${JSON.stringify([...domainCounts.entries()])}`);
     const result = Array.from(domainCounts.entries()).map(([name, count]) => ({
       name,
       documentCount: count
     }));
-    console.error(`[DEBUG] listDomains result: ${JSON.stringify(result)}`);
+    logger.debug(`listDomains result: ${JSON.stringify(result)}`);
 
     return result;
   }

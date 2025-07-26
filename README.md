@@ -32,6 +32,20 @@ npm install && npm run build && cp config.example.json config.json
 npm start
 ```
 
+### 글로벌 설치 (npx 사용)
+```bash
+# 글로벌 설치
+npm install -g .
+
+# 어디서든 사용 가능
+npx mcp-knowledge-retrieval
+```
+
+**글로벌 설치의 장점:**
+- ✅ 어느 디렉토리에서든 실행 가능
+- ✅ Claude Desktop 설정이 간단해짐 
+- ✅ npx를 통한 자동 실행
+
 ### 개발 모드
 ```bash
 npm run dev
@@ -95,7 +109,24 @@ npm run dev
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
 
-### 설정 내용 (절대 경로)
+### 설정 내용
+
+#### 방법 1: npx 사용 (글로벌 설치 후 권장)
+```json
+{
+  "mcpServers": {
+    "knowledge-retrieval": {
+      "command": "npx",
+      "args": ["mcp-knowledge-retrieval"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}
+```
+
+#### 방법 2: 절대 경로 사용 (로컬 설치)
 ```json
 {
   "mcpServers": {
@@ -110,9 +141,9 @@ npm run dev
 }
 ```
 
-**중요**: `<프로젝트_경로>`를 실제 프로젝트 폴더의 절대 경로로 바꾸세요!
+**중요**: 방법 2 사용시 `<프로젝트_경로>`를 실제 프로젝트 폴더의 절대 경로로 바꾸세요!
 
-### 권장 설정 (작업 디렉토리 지정)
+#### 방법 3: npm start 사용 (작업 디렉토리 지정)
 ```json
 {
   "mcpServers": {
@@ -124,6 +155,8 @@ npm run dev
   }
 }
 ```
+
+**추천 순서**: 방법 1 (npx) → 방법 3 (npm start) → 방법 2 (절대 경로)
 
 ## 📁 문서 구조
 

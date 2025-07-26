@@ -3,6 +3,8 @@ import * as fsSync from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { KnowledgeDocument, createRemoteMarkdownDocument } from '../models/Document.js';
+import { logger } from '../utils/logger.js';
+import { validateDirectoryPath, secureFileRead, validateAndSanitizeUrl, SecurityError } from '../utils/security.js';
 
 export interface DocumentSource {
   type: 'local' | 'remote';
@@ -31,25 +33,28 @@ export class DocumentLoader {
     this.documents = [];
     this.documentIdCounter = 0;
 
-    console.error(`[DEBUG] DocumentLoader.loadAllDocuments start. Domains to process: ${this.source.domains.length}`);
-    console.error(`[DEBUG] Base path: ${this.source.basePath}`);
-    console.error(`[DEBUG] Source type: ${this.source.type}`);
+    logger.debug(`=== DOCUMENT LOADER START ===`);
+    logger.debug(`DocumentLoader.loadAllDocuments start. Domains to process: ${this.source.domains.length}`);
+    logger.debug(`Base path: ${this.source.basePath}`);
+    logger.debug(`Source type: ${this.source.type}`);
     
     // 도메인 설정 정보 출력 (auto-discovery 지원)
     if (this.source.domains.length > 0) {
-      console.error(`[DEBUG] Domain configuration:`);
+      logger.debug(`Domain configuration received by DocumentLoader:`);
       for (const domain of this.source.domains) {
-        console.error(`[DEBUG]   - ${domain.name}: ${domain.path} (${domain.category || 'No category'})`);
+        logger.debug(`  - ${domain.name}: ${domain.path} (${domain.category || 'No category'})`);
       }
+    } else {
+      logger.debug(`WARNING: DocumentLoader received NO domains!`);
     }
     
     for (const domain of this.source.domains) {
-      console.error(`[DEBUG] Processing domain: ${domain.name}, path: ${domain.path}, category: ${domain.category || 'N/A'}`);
+      logger.debug(`Processing domain: ${domain.name}, path: ${domain.path}, category: ${domain.category || 'N/A'}`);
       await this.loadDomainDocuments(domain);
-      console.error(`[DEBUG] Completed domain: ${domain.name}. Total documents so far: ${this.documents.length}`);
+      logger.debug(`Completed domain: ${domain.name}. Total documents so far: ${this.documents.length}`);
     }
 
-    console.error(`[DEBUG] DocumentLoader.loadAllDocuments completed. Total documents loaded: ${this.documents.length}`);
+    logger.debug(`DocumentLoader.loadAllDocuments completed. Total documents loaded: ${this.documents.length}`);
     
     // 로드된 문서들의 도메인별 통계 출력
     this.logDomainStatistics();
@@ -66,10 +71,19 @@ export class DocumentLoader {
     category?: string;
   }): Promise<void> {
     const fullPath = path.join(this.source.basePath, domain.path);
-    console.error(`[DEBUG] loadDomainDocuments for ${domain.name}. fullPath=${fullPath}. exists=${fsSync.existsSync(fullPath)}`);
+    logger.debug(`loadDomainDocuments for ${domain.name}. fullPath=${fullPath}. exists=${fsSync.existsSync(fullPath)}`);
 
     if (this.source.type === 'local') {
-      await this.loadLocalDocuments(fullPath, domain.name, domain.category);
+      try {
+        const validatedPath = validateDirectoryPath(fullPath, this.source.basePath);
+        await this.loadLocalDocuments(validatedPath, domain.name, domain.category);
+      } catch (error) {
+        if (error instanceof SecurityError) {
+          logger.warn(`Skipping domain ${domain.name} due to security issue: ${error.message}`);
+          return;
+        }
+        throw error;
+      }
     } else {
       await this.loadRemoteDocuments(fullPath, domain.name, domain.category);
     }
@@ -93,21 +107,30 @@ export class DocumentLoader {
           // 하위 디렉토리 재귀적 탐색
           await this.loadLocalDocuments(fullPath, domainName, category);
         } else if (entry.isFile() && this.isMarkdownFile(entry.name)) {
-          // 마크다운 파일 로드
-          const content = await fs.readFile(fullPath, 'utf-8');
-          const document = this.createDocument(
-            content,
-            fullPath,
-            domainName,
-            category
-          );
-          this.documents.push(document);
+          // 마크다운 파일 로드 (보안 검사 포함)
+          try {
+            const secureFilePath = secureFileRead(fullPath, dirPath);
+            const content = await fs.readFile(secureFilePath, 'utf-8');
+            const document = this.createDocument(
+              content,
+              secureFilePath,
+              domainName,
+              category
+            );
+            this.documents.push(document);
+          } catch (error) {
+            if (error instanceof SecurityError) {
+              logger.warn(`Skipping file ${fullPath} due to security issue: ${error.message}`);
+              continue;
+            }
+            throw error;
+          }
         }
       }
     } catch (error) {
-      console.error(`[DEBUG] Failed to load local documents from ${dirPath}:`, (error as Error).message);
-      console.error(`[DEBUG] Working directory: ${process.cwd()}`);
-      console.error(`[DEBUG] Directory exists: ${fsSync.existsSync(dirPath)}`);
+      logger.error(`Failed to load local documents from ${dirPath}:`, (error as Error).message);
+      logger.debug(`Working directory: ${process.cwd()}`);
+      logger.debug(`Directory exists: ${fsSync.existsSync(dirPath)}`);
       // Failed to load documents (silent for MCP protocol)
     }
   }
@@ -121,33 +144,54 @@ export class DocumentLoader {
     category?: string
   ): Promise<void> {
     try {
-      // llms.txt 파일 로드 시도
+      // llms.txt 파일 로드 시도 (보안 검사 포함)
       const llmsUrl = `${baseUrl}/llms.txt`;
-      const response = await axios.get(llmsUrl);
+      const validatedLlmsUrl = validateAndSanitizeUrl(llmsUrl);
+      const response = await axios.get(validatedLlmsUrl, {
+        timeout: 10000, // 10초 타임아웃
+        maxContentLength: 1024 * 1024, // 1MB 최대 크기
+        maxRedirects: 3 // 최대 3번 리다이렉트
+      });
       const llmsContent = response.data;
 
       // llms.txt 파싱하여 문서 URL 추출
       const documentUrls = this.parseLlmsTxt(llmsContent, baseUrl);
 
-      // 각 문서 로드
+      // 각 문서 로드 (보안 검사 포함)
       for (const docUrl of documentUrls) {
         try {
-          const docResponse = await axios.get(docUrl);
+          const validatedDocUrl = validateAndSanitizeUrl(docUrl);
+          const docResponse = await axios.get(validatedDocUrl, {
+            timeout: 10000, // 10초 타임아웃
+            maxContentLength: 10 * 1024 * 1024, // 10MB 최대 크기
+            maxRedirects: 3 // 최대 3번 리다이렉트
+          });
           const content = docResponse.data;
+          
+          // 콘텐츠 크기 추가 검사
+          if (typeof content === 'string' && content.length > 10 * 1024 * 1024) {
+            logger.warn(`Document ${validatedDocUrl} too large, skipping`);
+            continue;
+          }
+          
           const document = this.createDocument(
             content,
-            docUrl,
+            validatedDocUrl,
             domainName,
             category
           );
           this.documents.push(document);
         } catch (error) {
-          console.error(`[DEBUG] Failed to load remote document ${docUrl}:`, (error as Error).message);
+          if (error instanceof SecurityError) {
+            logger.warn(`Skipping document ${docUrl} due to security issue: ${error.message}`);
+            continue;
+          }
+          logger.error(`Failed to load remote document ${docUrl}:`, (error as Error).message);
           // Failed to load document (silent for MCP protocol)
         }
       }
     } catch (error) {
-      console.error(`[DEBUG] Failed to load remote documents from ${baseUrl}:`, (error as Error).message);
+      logger.error(`Failed to load remote documents from ${baseUrl}:`, (error as Error).message);
       // Failed to load documents (silent for MCP protocol)
     }
   }
@@ -159,14 +203,37 @@ export class DocumentLoader {
     const urls: string[] = [];
     const lines = content.split('\n');
 
+    // 라인 수 제한 (DoS 방지)
+    if (lines.length > 1000) {
+      logger.warn('llms.txt has too many lines, limiting to first 1000');
+      lines.length = 1000;
+    }
+
     for (const line of lines) {
       const trimmed = line.trim();
       if (trimmed && !trimmed.startsWith('#')) {
-        // 상대 경로를 절대 경로로 변환
-        const url = trimmed.startsWith('http') 
-          ? trimmed 
-          : `${baseUrl}/${trimmed}`;
-        urls.push(url);
+        try {
+          // 상대 경로를 절대 경로로 변환
+          const url = trimmed.startsWith('http') 
+            ? trimmed 
+            : `${baseUrl}/${trimmed}`;
+          
+          // URL 검증
+          const validatedUrl = validateAndSanitizeUrl(url);
+          urls.push(validatedUrl);
+          
+          // URL 수 제한 (DoS 방지)
+          if (urls.length >= 100) {
+            logger.warn('Too many URLs in llms.txt, limiting to first 100');
+            break;
+          }
+        } catch (error) {
+          if (error instanceof SecurityError) {
+            logger.warn(`Skipping invalid URL in llms.txt: ${trimmed} - ${error.message}`);
+            continue;
+          }
+          throw error;
+        }
       }
     }
 
@@ -202,7 +269,7 @@ export class DocumentLoader {
       domainName
     );
 
-    console.error(`[DEBUG] Created document: ID=${document.id}, title=${document.title}, domainName=${document.domainName}`);
+    logger.debug(`Created document: ID=${document.id}, title=${document.title}, domainName=${document.domainName}`);
 
     return document;
   }
@@ -226,7 +293,7 @@ export class DocumentLoader {
    */
   private logDomainStatistics(): void {
     if (this.documents.length === 0) {
-      console.error(`[DEBUG] No documents loaded`);
+      logger.debug(`No documents loaded`);
       return;
     }
 
@@ -238,12 +305,12 @@ export class DocumentLoader {
       domainStats.set(domainName, count + 1);
     }
 
-    console.error(`[DEBUG] Document loading statistics:`);
-    console.error(`[DEBUG] Total documents: ${this.documents.length}`);
-    console.error(`[DEBUG] Documents by domain:`);
+    logger.debug(`Document loading statistics:`);
+    logger.debug(`Total documents: ${this.documents.length}`);
+    logger.debug(`Documents by domain:`);
     
     for (const [domain, count] of domainStats.entries()) {
-      console.error(`[DEBUG]   - ${domain}: ${count} documents`);
+      logger.debug(`  - ${domain}: ${count} documents`);
     }
   }
 } 

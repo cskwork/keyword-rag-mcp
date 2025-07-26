@@ -11,182 +11,83 @@ import {
 import { loadConfig } from './config/config.js';
 import { DocumentLoader } from './services/DocumentLoader.js';
 import { DocumentRepository } from './services/DocumentRepository.js';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { logger } from './utils/logger.js';
+import { validateToolArguments, ValidationError } from './utils/validation.js';
 
 // 전역 변수
 let repository: DocumentRepository | null = null;
 let config: any = null;
-let isInitialized = false;
-let isInitializing = false;
 
-console.error(`[DEBUG] Module loaded at ${new Date().toISOString()}`);
-
-// PID 파일 경로
-const PID_FILE = path.join(os.tmpdir(), 'mcp-knowledge-retrieval.pid');
-
-/**
- * 프로세스 잠금 확인 및 설정
- */
-function checkAndSetProcessLock(): void {
-  try {
-    if (fs.existsSync(PID_FILE)) {
-      const existingPid = fs.readFileSync(PID_FILE, 'utf8').trim();
-      
-      // 기존 프로세스가 실행 중인지 확인
-      try {
-        process.kill(parseInt(existingPid), 0); // 시그널 0으로 프로세스 존재 확인
-        console.error(`[ERROR] MCP server already running with PID ${existingPid}`);
-        console.error(`[ERROR] Kill existing process first: kill ${existingPid}`);
-        process.exit(1);
-      } catch (e) {
-        // 프로세스가 존재하지 않으면 PID 파일 제거
-        console.error(`[DEBUG] Stale PID file found, removing...`);
-        fs.unlinkSync(PID_FILE);
-      }
-    }
-    
-    // 현재 프로세스 PID 저장
-    fs.writeFileSync(PID_FILE, process.pid.toString());
-    console.error(`[DEBUG] Process lock acquired, PID: ${process.pid}`);
-    
-    // 프로세스 종료 시 PID 파일 정리
-    process.on('exit', () => {
-      try {
-        if (fs.existsSync(PID_FILE)) {
-          fs.unlinkSync(PID_FILE);
-        }
-      } catch (e) {
-        // 무시
-      }
-    });
-    
-    process.on('SIGINT', () => {
-      console.error(`[DEBUG] Received SIGINT, cleaning up...`);
-      process.exit(0);
-    });
-    
-    process.on('SIGTERM', () => {
-      console.error(`[DEBUG] Received SIGTERM, cleaning up...`);
-      process.exit(0);
-    });
-    
-  } catch (error) {
-    console.error(`[ERROR] Failed to set process lock: ${error}`);
-    process.exit(1);
-  }
-}
+logger.debug(`Module loaded at ${new Date().toISOString()}`);
 
 /**
  * MCP 서버 초기화
  */
-async function initializeServer() {
-  console.error(`[DEBUG] initializeServer() started, isInitialized=${isInitialized}, isInitializing=${isInitializing}`);
-  
-  if (isInitialized && repository?.isInitialized()) {
-    console.error(`[DEBUG] Already initialized, skipping. Repository has ${repository.getStatistics().totalDocuments} documents`);
+async function initializeServer(): Promise<void> {
+  if (repository) {
+    logger.debug(`Server already initialized`);
     return;
   }
   
-  if (isInitializing) {
-    console.error(`[DEBUG] Already initializing, waiting...`);
-    // 초기화 완료까지 대기
-    while (isInitializing && !isInitialized) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    return;
-  }
+  logger.debug(`Starting server initialization`);
   
-  try {
-    isInitializing = true;
-    
-    // 설정 로드
-    console.error(`[DEBUG] Loading config...`);
-    config = await loadConfig();
-    console.error(`[DEBUG] Config loaded`);
-    console.error(`[DEBUG] config.documentSource.basePath=${config.documentSource.basePath}`);
-    console.error(`[DEBUG] config.documentSource.domains length=${config.documentSource.domains.length}`);
-    config.documentSource.domains.forEach((d: {name: string; path: string; category?: string})=>
-      console.error(`[DEBUG] domain-> name:${d.name}, path:${d.path}`)
-    );
+  // 설정 로드
+  logger.debug(`Loading config...`);
+  config = await loadConfig();
+  
+  // 로거 레벨 설정
+  logger.setLevel(config.logLevel);
+  logger.debug(`Config loaded`);
+  logger.debug(`config.documentSource.basePath=${config.documentSource.basePath}`);
+  logger.debug(`config.documentSource.domains length=${config.documentSource.domains.length}`);
+  config.documentSource.domains.forEach((d: {name: string; path: string; category?: string})=>
+    logger.debug(`domain-> name:${d.name}, path:${d.path}`)
+  );
 
-    // 문서 로드
-    console.error(`[DEBUG] Creating DocumentLoader...`);
-    const loader = new DocumentLoader(config.documentSource);
-    console.error(`[DEBUG] Loading documents...`);
-    const documents = await loader.loadAllDocuments();
-    console.error(`[DEBUG] Documents loaded: ${documents.length} documents`);
+  // 문서 로드
+  logger.debug(`Creating DocumentLoader...`);
+  const loader = new DocumentLoader(config.documentSource);
+  logger.debug(`Loading documents...`);
+  const documents = await loader.loadAllDocuments();
+  logger.debug(`Documents loaded: ${documents.length} documents`);
 
-    // 저장소 생성 및 초기화 (기존 repository가 있으면 재사용하지 않고 새로 생성)
-    console.error(`[DEBUG] Creating and initializing DocumentRepository...`);
-    if (!repository) {
-      repository = new DocumentRepository();
-    }
-    
-    // repository가 이미 초기화되어 있다면 재초기화하지 않음
-    if (!repository.isInitialized()) {
-      await repository.initialize(documents); // 비동기 초기화 대기
-    } else {
-      console.error(`[DEBUG] Repository already initialized, skipping re-initialization`);
-    }
-    
-    const stats = repository.getStatistics();
-    console.error(`[DEBUG] Repository fully initialized`);
-    console.error(`[DEBUG] Repository instance: ${repository ? 'EXISTS' : 'NULL'}`);
-    console.error(`[DEBUG] Repository stats: ${JSON.stringify(stats)}`);
-    
-    isInitialized = true;
-    console.error(`[DEBUG] initializeServer() completed successfully, isInitialized=${isInitialized}`);
-  } catch (error) {
-    console.error(`[DEBUG] Error in initializeServer(): ${error}`);
-    isInitialized = false;
-    throw error;
-  } finally {
-    isInitializing = false;
-  }
+  // 저장소 생성 (생성자에서 동기적으로 초기화)
+  logger.debug(`Creating and initializing DocumentRepository...`);
+  repository = new DocumentRepository(documents);
+  
+  const stats = repository.getStatistics();
+  logger.debug(`Repository fully initialized`);
+  logger.debug(`Repository stats: ${JSON.stringify(stats)}`);
+  
+  logger.debug(`Server initialization completed successfully`);
 }
 
 /**
- * 서버가 준비될 때까지 대기
+ * 서버 준비 상태 보장
  */
-async function ensureServerReady() {
-  // 이미 초기화된 경우 기존 repository 사용
-  if (isInitialized && repository?.isInitialized()) {
-    console.error(`[DEBUG] ensureServerReady: Already initialized, using existing repository with ${repository.getStatistics().totalDocuments} documents`);
-    return;
+function ensureServerReady(): DocumentRepository {
+  if (!repository) {
+    throw new Error('Server not initialized. Call initializeServer() first.');
   }
   
-  if (!isInitialized && !isInitializing) {
-    console.error(`[DEBUG] ensureServerReady: Starting initialization...`);
-    await initializeServer();
-  } else if (isInitializing) {
-    console.error(`[DEBUG] ensureServerReady: Waiting for initialization to complete...`);
-    while (isInitializing) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+  if (!repository.isInitialized()) {
+    throw new Error('Repository not properly initialized.');
   }
   
-  // 초기화 후 상태 검증
-  if (!repository || !repository.isInitialized()) {
-    throw new Error('Repository initialization failed or corrupted');
-  }
+  return repository;
 }
 
 /**
  * MCP 서버 생성 및 시작
  */
 async function main() {
-  console.error(`[DEBUG] Starting main() function at ${new Date().toISOString()}`);
+  logger.debug(`Starting main() function at ${new Date().toISOString()}`);
   
-  // 프로세스 중복 실행 방지
-  checkAndSetProcessLock();
-  
-  // 서버 초기화 (문서 로딩 및 인덱싱 완료까지 대기)
-  console.error(`[DEBUG] About to call initializeServer()`);
+  // 서버 초기화
+  logger.debug(`About to call initializeServer()`);
   await initializeServer();
-  console.error(`[DEBUG] initializeServer() completed, repository exists: ${!!repository}`);
-  console.error(`[DEBUG] Repository initialized: ${repository?.isInitialized()}`);
+  logger.debug(`initializeServer() completed, repository exists: ${!!repository}`);
+  logger.debug(`Repository initialized: ${repository?.isInitialized()}`);
 
   // MCP 서버 생성
   const server = new Server(
@@ -205,11 +106,7 @@ async function main() {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     // This is a dummy handler, tools are managed by the client
     if (!config) {
-      try {
-        await ensureServerReady();
-      } catch(e) {
-        console.error("Failed to initialize server for ListTools", e);
-      }
+      // ListTools는 단순 도구 목록 반환이므로 초기화 강제 안함
     }
     const tools: Tool[] = [
         {
@@ -290,37 +187,46 @@ async function main() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     
-    console.error(`[DEBUG] Tool called: ${name}`);
-    console.error(`[DEBUG] Repository state: ${repository ? 'EXISTS' : 'NULL'}`);
+    logger.debug(`Tool called: ${name}`);
+    logger.debug(`Repository state: ${repository ? 'EXISTS' : 'NULL'}`);
+    
+    // 입력 매개변수 검증
+    let validatedArgs: any;
+    try {
+      validatedArgs = validateToolArguments(name, args);
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        const content: TextContent[] = [{
+          type: 'text',
+          text: `Invalid parameters: ${error.message}`
+        }];
+        return { content };
+      }
+      throw error;
+    }
     
     // 도구 호출 전에 반드시 서버 준비 상태 확인
+    let activeRepository: DocumentRepository;
     try {
-      await ensureServerReady();
+      activeRepository = ensureServerReady();
     } catch (error) {
-      console.error('[FATAL] Server initialization failed during tool call:', error);
-      throw new Error('Server is not initialized and failed to recover. Please check logs and restart.');
+      logger.error('Server not ready for tool call:', error);
+      const content: TextContent[] = [{
+        type: 'text',
+        text: 'Server is not initialized. Please restart the server.'
+      }];
+      return { content };
     }
 
     // 상태 로깅
-    if (repository) {
-      console.error(`[DEBUG] Repository instance ID: ${repository.getInstanceId()}`);
-      console.error(`[DEBUG] Repository documents count: ${repository.getStatistics().totalDocuments}`);
-    }
-
-    // 이 시점에서 repository는 null이 아님을 보장
-    if (!repository || !repository.isInitialized()) {
-      throw new Error('Repository is not properly initialized');
-    }
+    logger.debug(`Repository instance ID: ${activeRepository.getInstanceId()}`);
+    logger.debug(`Repository documents count: ${activeRepository.getStatistics().totalDocuments}`);
 
     switch (name) {
       case 'search-documents': {
-        const { keywords, domain, topN } = args as {
-          keywords: string[];
-          domain?: string;
-          topN?: number;
-        };
+        const { keywords, domain, topN } = validatedArgs;
 
-        const results = await repository.searchDocuments(keywords, {
+        const results = await activeRepository.searchDocuments(keywords, {
           domain,
           topN,
           contextWindow: config.chunk.contextWindowSize
@@ -335,8 +241,8 @@ async function main() {
       }
 
       case 'get-document-by-id': {
-        const { id } = args as { id: number };
-        const document = repository.getDocumentById(id);
+        const { id } = validatedArgs;
+        const document = activeRepository.getDocumentById(id);
 
         if (!document) {
           const content: TextContent[] = [{
@@ -356,9 +262,9 @@ async function main() {
       }
 
       case 'list-domains': {
-        console.error(`[DEBUG] list-domains called`);
-        const domains = repository.listDomains();
-        console.error(`[DEBUG] domains found: ${JSON.stringify(domains)}`);
+        logger.debug(`list-domains called`);
+        const domains = activeRepository.listDomains();
+        logger.debug(`domains found: ${JSON.stringify(domains)}`);
         
         if (domains.length === 0) {
           const content: TextContent[] = [{
@@ -381,13 +287,9 @@ async function main() {
       }
 
       case 'get-chunk-with-context': {
-        const { documentId, chunkId, windowSize } = args as {
-          documentId: number;
-          chunkId: number;
-          windowSize?: number;
-        };
+        const { documentId, chunkId, windowSize } = validatedArgs;
 
-        const document = repository.getDocumentById(documentId);
+        const document = activeRepository.getDocumentById(documentId);
         if (!document) {
           const content: TextContent[] = [{
             type: 'text',
@@ -397,7 +299,7 @@ async function main() {
           return { content };
         }
 
-        const chunks = document.getChunkWithWindow(chunkId, windowSize || 1);
+        const chunks = document.getChunkWithWindow(chunkId, windowSize);
         if (chunks.length === 0) {
           const content: TextContent[] = [{
             type: 'text',
@@ -429,17 +331,17 @@ async function main() {
 
 // 에러 핸들링
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught exception:', error);
+  logger.error('Uncaught exception:', error);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled rejection at:', promise, 'reason:', reason);
+  logger.error('Unhandled rejection at:', promise, 'reason:', reason);
   process.exit(1);
 });
 
 // 서버 시작
 main().catch((error) => {
-  console.error('Failed to start server:', error);
+  logger.error('Failed to start server:', error);
   process.exit(1);
 }); 

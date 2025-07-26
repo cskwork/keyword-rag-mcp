@@ -2,6 +2,8 @@ import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 import path from 'path';
 import { CategoryMapper, defaultCategoryMapper } from '../utils/categoryMapper.js';
+import { logger } from '../utils/logger.js';
+import { validateDirectoryPath, SecurityError } from '../utils/security.js';
 
 /**
  * 도메인 정보 인터페이스
@@ -50,26 +52,30 @@ export class DomainDiscoveryService {
    * @returns 발견된 도메인 목록
    */
   async discoverDomains(basePath: string): Promise<DiscoveredDomain[]> {
-    console.error(`[DEBUG] DomainDiscoveryService: Starting domain discovery in ${basePath}`);
+    logger.debug(`DomainDiscoveryService: Starting domain discovery in ${basePath}`);
     
-    if (!fsSync.existsSync(basePath)) {
-      console.error(`[DEBUG] DomainDiscoveryService: Base path does not exist: ${basePath}`);
-      return [];
-    }
-
-    if (!fsSync.statSync(basePath).isDirectory()) {
-      console.error(`[DEBUG] DomainDiscoveryService: Base path is not a directory: ${basePath}`);
-      return [];
+    // 경로 보안 검증
+    let validatedBasePath: string;
+    try {
+      // 기본 경로는 현재 작업 디렉토리를 기준으로 검증
+      const baseForValidation = path.resolve(process.cwd());
+      validatedBasePath = validateDirectoryPath(basePath, baseForValidation);
+    } catch (error) {
+      if (error instanceof SecurityError) {
+        logger.debug(`DomainDiscoveryService: Security validation failed: ${error.message}`);
+        return [];
+      }
+      throw error;
     }
 
     try {
       const discoveredDomains: DiscoveredDomain[] = [];
-      await this.scanDirectory(basePath, '', discoveredDomains, 0);
+      await this.scanDirectory(validatedBasePath, '', discoveredDomains, 0);
       
-      console.error(`[DEBUG] DomainDiscoveryService: Discovered ${discoveredDomains.length} domains`);
+      logger.debug(`DomainDiscoveryService: Discovered ${discoveredDomains.length} domains`);
       return discoveredDomains;
     } catch (error) {
-      console.error(`[DEBUG] DomainDiscoveryService: Error during discovery:`, error);
+      logger.error(`DomainDiscoveryService: Error during discovery:`, error);
       return [];
     }
   }
@@ -109,6 +115,17 @@ export class DomainDiscoveryService {
         const entryPath = path.join(currentPath, folderName);
         const entryRelativePath = relativePath ? path.join(relativePath, folderName) : folderName;
 
+        // 디렉토리 보안 검증
+        try {
+          validateDirectoryPath(entryPath, currentPath);
+        } catch (error) {
+          if (error instanceof SecurityError) {
+            logger.debug(`Skipping directory ${entryPath} due to security issue: ${error.message}`);
+            continue;
+          }
+          throw error;
+        }
+
         // 마크다운 파일이 있는지 확인
         const documentCount = await this.countMarkdownFiles(entryPath);
         
@@ -129,10 +146,10 @@ export class DomainDiscoveryService {
         };
 
         domains.push(domain);
-        console.error(`[DEBUG] DomainDiscoveryService: Found domain '${domain.name}' at '${domain.path}' (${documentCount} documents)`);
+        logger.debug(`DomainDiscoveryService: Found domain '${domain.name}' at '${domain.path}' (${documentCount} documents)`);
       }
     } catch (error) {
-      console.error(`[DEBUG] DomainDiscoveryService: Error scanning directory ${currentPath}:`, error);
+      logger.error(`DomainDiscoveryService: Error scanning directory ${currentPath}:`, error);
     }
   }
 
@@ -188,8 +205,8 @@ export class DomainDiscoveryService {
    * @returns 도메인 이름
    */
   private generateDomainName(relativePath: string): string {
-    // 경로 구분자를 하이픈으로 변경하여 도메인 이름 생성
-    return relativePath.replace(/[\/\\]/g, '-').toLowerCase();
+    // 공백, 경로 구분자를 하이픈으로 변경하여 도메인 이름 생성
+    return relativePath.replace(/[\s\/\\]+/g, '-').toLowerCase();
   }
 
   /**
@@ -205,6 +222,9 @@ export class DomainDiscoveryService {
     const merged: DiscoveredDomain[] = [];
     const manualDomainPaths = new Set(manualDomains.map(d => d.path));
 
+    logger.debug(`=== MERGE DOMAINS START ===`);
+    logger.debug(`Manual domain paths: [${Array.from(manualDomainPaths).join(', ')}]`);
+
     // 수동 설정된 도메인들 추가
     for (const manual of manualDomains) {
       merged.push({
@@ -213,15 +233,23 @@ export class DomainDiscoveryService {
         category: manual.category || this.categoryMapper.mapCategory(manual.name),
         isAutoDiscovered: false
       });
+      logger.debug(`Added manual domain: ${manual.name} -> ${manual.path}`);
     }
 
     // 자동 발견된 도메인 중 수동 설정에 없는 것들만 추가
     for (const discovered of discoveredDomains) {
-      if (!manualDomainPaths.has(discovered.path)) {
+      const pathExists = manualDomainPaths.has(discovered.path);
+      logger.debug(`Checking discovered domain: ${discovered.name} -> ${discovered.path} (exists in manual: ${pathExists})`);
+      
+      if (!pathExists) {
         merged.push(discovered);
+        logger.debug(`Added discovered domain: ${discovered.name} -> ${discovered.path}`);
+      } else {
+        logger.debug(`Skipped discovered domain (path exists in manual): ${discovered.name} -> ${discovered.path}`);
       }
     }
 
+    logger.debug(`=== MERGE DOMAINS END: ${merged.length} total domains ===`);
     return merged;
   }
 

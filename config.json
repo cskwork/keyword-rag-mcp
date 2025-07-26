@@ -38,5 +38,5 @@
     "minWords": 30,
     "contextWindowSize": 1
   },
-  "logLevel": "info"
+  "logLevel": "debug"
 }
